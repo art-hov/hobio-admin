@@ -1,0 +1,62 @@
+name: Screenshots
+
+# Renders every page in a real browser against a throwaway SQL Server with sample data, and pushes the
+# PNGs to the "ci-screenshots" branch so they can be reviewed without deploying. Manual only.
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  screenshots:
+    runs-on: ubuntu-24.04
+
+    services:
+      sql:
+        image: mcr.microsoft.com/mssql/server:2022-latest
+        env:
+          ACCEPT_EULA: 'Y'
+          MSSQL_SA_PASSWORD: 'CiOnly!Passw0rd-2026'
+        ports:
+          - 1433:1433
+        options: >-
+          --health-cmd "/opt/mssql-tools18/bin/sqlcmd -C -S localhost -U sa -P 'CiOnly!Passw0rd-2026' -Q 'SELECT 1' -b"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 30
+
+    env:
+      HOBIO_TEST_SQL: 'Server=localhost,1433;User Id=sa;Password=CiOnly!Passw0rd-2026;TrustServerCertificate=True;Encrypt=False'
+      HOBIO_REQUIRE_SQL_TESTS: '1'
+      HOBIO_SCREENSHOTS_DIR: ${{ github.workspace }}/shots
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Build
+        run: dotnet build tests/HobioAdmin.Tests/HobioAdmin.Tests.csproj --configuration Release
+
+      - name: Install Chromium for Playwright
+        run: pwsh tests/HobioAdmin.Tests/bin/Release/net10.0/playwright.ps1 install --with-deps chromium
+
+      - name: Capture
+        run: dotnet test tests/HobioAdmin.Tests/HobioAdmin.Tests.csproj --configuration Release --no-build --filter "Category=Screenshots" --logger "console;verbosity=normal"
+
+      - name: Publish to ci-screenshots branch
+        run: |
+          set -euo pipefail
+          ls -la shots
+          cd shots
+          git init -q
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git checkout -q -b ci-screenshots
+          git add .
+          git commit -q -m "Screenshots for ${GITHUB_SHA::12}"
+          git push -f "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git" ci-screenshots

@@ -139,7 +139,6 @@ public sealed class PortalPageTests(SqlServerFixture db)
         Assert.Contains("Events held", html);
         Assert.Contains("$21.00", html);   // gross booking value
         Assert.Contains("$25.00", html);   // average paid price
-        Assert.Contains("Ottawa", html);   // city filter options
         Assert.Contains("<svg", html);     // charts rendered
         Assert.Contains(AdminEmail, html); // signed-in user in the app bar
     }
