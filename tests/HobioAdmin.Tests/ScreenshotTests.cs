@@ -33,12 +33,12 @@ public sealed class ScreenshotTests(SqlServerFixture db)
         Directory.CreateDirectory(outputDir);
 
         await using var signedIn = CreateFactory(signedIn: true);
-        signedIn.UseKestrel(0);
+        signedIn.UseKestrel(5181);
         signedIn.StartServer();
         var baseUrl = signedIn.ClientOptions.BaseAddress.ToString().TrimEnd('/');
 
         await using var anonymous = CreateFactory(signedIn: false);
-        anonymous.UseKestrel(0);
+        anonymous.UseKestrel(5182);
         anonymous.StartServer();
         var anonymousUrl = anonymous.ClientOptions.BaseAddress.ToString().TrimEnd('/');
 
