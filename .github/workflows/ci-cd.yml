@@ -88,6 +88,34 @@ jobs:
         if: github.event_name != 'pull_request'
         run: dotnet publish src/HobioAdmin.Web/HobioAdmin.Web.csproj --configuration Release --no-restore --output ./publish
 
+      - name: Smoke test the published app
+        if: github.event_name != 'pull_request'
+        working-directory: ./publish
+        env:
+          ASPNETCORE_ENVIRONMENT: Production
+          ASPNETCORE_URLS: http://127.0.0.1:5199
+          Auth__RequireHttps: 'false'
+        run: |
+          set -euo pipefail
+          dotnet HobioAdmin.Web.dll > ../smoke.log 2>&1 &
+          PID=$!
+          for i in $(seq 1 30); do curl -fs http://127.0.0.1:5199/healthz >/dev/null && break; sleep 1; done
+          check() {
+            code=$(curl -s -o /dev/null -w '%{http_code}' "http://127.0.0.1:5199$1")
+            echo "$1 -> $code"
+            [ "$code" = "$2" ] || { echo "::error title=Smoke test::$1 returned $code, expected $2"; cat ../smoke.log; kill $PID; exit 1; }
+          }
+          check /healthz 200
+          check /login 200
+          check /img/logo.svg 200
+          check /_content/MudBlazor/MudBlazor.min.css 200
+          check /_content/MudBlazor/MudBlazor.min.js 200
+          check /js/login.js 200
+          check / 302
+          BLAZOR=$(curl -s http://127.0.0.1:5199/login | grep -o '_framework/blazor.web[^"]*\.js' | head -1)
+          check "/$BLAZOR" 200
+          kill $PID
+
       - name: Add Elastic Beanstalk files
         if: github.event_name != 'pull_request'
         run: |

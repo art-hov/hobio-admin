@@ -83,7 +83,8 @@ public sealed class ScreenshotTests(SqlServerFixture db)
     private WebApplicationFactory<HobioAdmin.Web.WebAppMarker> CreateFactory(bool signedIn, int port) =>
         new WebApplicationFactory<HobioAdmin.Web.WebAppMarker>().WithWebHostBuilder(builder =>
         {
-            builder.UseEnvironment("Testing");
+            // Development serves static web assets straight from the project (no publish step needed).
+            builder.UseEnvironment("Development");
             builder.UseUrls($"http://127.0.0.1:{port}");
             builder.UseSetting("Admin:AllowedEmails", "admin@hobio.ca");
             builder.UseSetting("Auth:RequireHttps", "false");
