@@ -129,7 +129,11 @@ public sealed class SqlServerFixture : IAsyncLifetime
         """;
 }
 
-public sealed class AnalyticsDatabaseTests(SqlServerFixture db) : IClassFixture<SqlServerFixture>
+[CollectionDefinition("sql")]
+public sealed class SqlCollection : ICollectionFixture<SqlServerFixture>;
+
+[Collection("sql")]
+public sealed class AnalyticsDatabaseTests(SqlServerFixture db)
 {
     private static readonly DateRange October = ReportPeriods.Create(new DateOnly(2026, 10, 1), new DateOnly(2026, 11, 1), BucketSize.Month);
 
@@ -321,8 +325,9 @@ public sealed class AnalyticsDatabaseTests(SqlServerFixture db) : IClassFixture<
         Assert.Equal(5, (int)(await ok.ExecuteScalarAsync())!);
     }
 
-    private sealed class FixedClock(DateTime utcNow) : TimeProvider
-    {
-        public override DateTimeOffset GetUtcNow() => new(utcNow, TimeSpan.Zero);
-    }
+}
+
+public sealed class FixedClock(DateTime utcNow) : TimeProvider
+{
+    public override DateTimeOffset GetUtcNow() => new(utcNow, TimeSpan.Zero);
 }

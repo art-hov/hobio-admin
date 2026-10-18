@@ -17,8 +17,6 @@ builder.Services.Configure<AdminAccessOptions>(builder.Configuration.GetSection(
 builder.Services.Configure<FirebaseOptions>(builder.Configuration.GetSection(FirebaseOptions.SectionName));
 builder.Services.Configure<AuthOptions>(builder.Configuration.GetSection(AuthOptions.SectionName));
 
-var authOptions = builder.Configuration.GetSection(AuthOptions.SectionName).Get<AuthOptions>() ?? new AuthOptions();
-
 builder.Services.AddRazorComponents().AddInteractiveServerComponents();
 builder.Services.AddMudServices();
 builder.Services.AddCascadingAuthenticationState();
@@ -42,10 +40,8 @@ builder.Services
         options.Cookie.Name = "hobio_admin";
         options.Cookie.HttpOnly = true;
         options.Cookie.SameSite = SameSiteMode.Strict;
-        options.Cookie.SecurePolicy = authOptions.RequireHttps ? CookieSecurePolicy.Always : CookieSecurePolicy.SameAsRequest;
         options.LoginPath = "/login";
         options.AccessDeniedPath = "/login?error=not_authorized";
-        options.ExpireTimeSpan = TimeSpan.FromHours(authOptions.SessionHours);
         options.SlidingExpiration = false;
         options.Events.OnValidatePrincipal = context =>
         {
@@ -59,6 +55,14 @@ builder.Services
 
             return Task.CompletedTask;
         };
+    });
+
+// Settings that depend on configuration are applied once configuration is complete.
+builder.Services.AddOptions<CookieAuthenticationOptions>(CookieAuthenticationDefaults.AuthenticationScheme)
+    .Configure<IOptions<AuthOptions>>((options, auth) =>
+    {
+        options.Cookie.SecurePolicy = auth.Value.RequireHttps ? CookieSecurePolicy.Always : CookieSecurePolicy.SameAsRequest;
+        options.ExpireTimeSpan = TimeSpan.FromHours(auth.Value.SessionHours);
     });
 
 builder.Services.AddAuthorizationBuilder()
@@ -76,6 +80,7 @@ builder.Services.Configure<ForwardedHeadersOptions>(options =>
 });
 
 var app = builder.Build();
+var authOptions = app.Services.GetRequiredService<IOptions<AuthOptions>>().Value;
 
 app.UseForwardedHeaders();
 
