@@ -14,6 +14,10 @@
   </ItemGroup>
 
   <ItemGroup>
+    <InternalsVisibleTo Include="HobioAdmin.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
     <EmbeddedResource Include="..\..\db\01_analytics_views.sql" LogicalName="01_analytics_views.sql" />
     <EmbeddedResource Include="..\..\db\02_readonly_user.sql" LogicalName="02_readonly_user.sql" />
   </ItemGroup>

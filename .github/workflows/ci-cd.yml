@@ -26,7 +26,7 @@ env:
 jobs:
   build-test:
     name: Build and test
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
 
     services:
       sql:
@@ -49,10 +49,10 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Setup .NET
-        uses: actions/setup-dotnet@v4
+        uses: actions/setup-dotnet@v5
         with:
           dotnet-version: ${{ env.DOTNET_VERSION }}
 
@@ -89,10 +89,10 @@ jobs:
           retention-days: 3
 
   deploy:
-    name: Deploy (${{ github.ref == 'refs/heads/release' && 'Prod' || 'Dev' }})
+    name: Deploy
     needs: build-test
     if: github.event_name != 'pull_request' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/release')
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     environment: ${{ github.ref == 'refs/heads/release' && 'Prod' || 'Dev' }}
     steps:
       - name: Check deployment settings
