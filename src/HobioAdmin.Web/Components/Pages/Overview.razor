@@ -71,8 +71,8 @@ else
         <ChartCard Title="New users" Subtitle="@BucketText" Data="_data.Users" SeriesIndexes="@(new[] { 0 })" ChartType="ChartType.Bar" />
         <ChartCard Title="Total sign-ups" Subtitle="Cumulative, all time" Data="_data.Users" SeriesIndexes="@(new[] { 1 })" ChartType="ChartType.Line" />
         <ChartCard Title="Events held and bookings" Subtitle="@BucketText" Data="_data.Activity" ChartType="ChartType.Bar" />
-        <ChartCard Title="Average paid event price" Subtitle="Paid events held, CAD" Data="_data.AveragePrice" ChartType="ChartType.Line" />
-        <ChartCard Title="Revenue" Subtitle="Gross booking value and Hobio fees, CAD, refunds excluded" Data="_data.Revenue" ChartType="ChartType.Line" />
+        <ChartCard Title="Average paid event price" Subtitle="Paid events held, CAD" Data="_data.AveragePrice" ChartType="ChartType.Bar" />
+        <ChartCard Title="Revenue" Subtitle="Gross booking value and Hobio fees, CAD, refunds excluded" Data="_data.Revenue" ChartType="ChartType.Bar" />
     </div>
 }
 
