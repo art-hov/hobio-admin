@@ -32,12 +32,12 @@ public sealed class ScreenshotTests(SqlServerFixture db)
 
         Directory.CreateDirectory(outputDir);
 
-        await using var signedIn = CreateFactory(signedIn: true);
+        await using var signedIn = CreateFactory(signedIn: true, port: 5181);
         signedIn.UseKestrel(5181);
         signedIn.StartServer();
         var baseUrl = signedIn.ClientOptions.BaseAddress.ToString().TrimEnd('/');
 
-        await using var anonymous = CreateFactory(signedIn: false);
+        await using var anonymous = CreateFactory(signedIn: false, port: 5182);
         anonymous.UseKestrel(5182);
         anonymous.StartServer();
         var anonymousUrl = anonymous.ClientOptions.BaseAddress.ToString().TrimEnd('/');
@@ -80,10 +80,11 @@ public sealed class ScreenshotTests(SqlServerFixture db)
         await File.WriteAllLinesAsync(Path.Combine(outputDir, "browser-errors.txt"), errors.DefaultIfEmpty("(none)"));
     }
 
-    private WebApplicationFactory<HobioAdmin.Web.WebAppMarker> CreateFactory(bool signedIn) =>
+    private WebApplicationFactory<HobioAdmin.Web.WebAppMarker> CreateFactory(bool signedIn, int port) =>
         new WebApplicationFactory<HobioAdmin.Web.WebAppMarker>().WithWebHostBuilder(builder =>
         {
             builder.UseEnvironment("Testing");
+            builder.UseUrls($"http://127.0.0.1:{port}");
             builder.UseSetting("Admin:AllowedEmails", "admin@hobio.ca");
             builder.UseSetting("Auth:RequireHttps", "false");
             builder.UseSetting("HobioAdmin:ReadOnlyConnectionString", db.ReaderConnectionString ?? "");
