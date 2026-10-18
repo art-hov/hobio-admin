@@ -72,7 +72,15 @@ jobs:
           if [ -n "$f" ]; then
             counters=$(grep -o '<Counters [^>]*>' "$f" | head -1)
             echo "::notice title=Test results::${counters}"
-            grep -o '<UnitTestResult [^>]*outcome="Failed"[^>]*>' "$f" | grep -o 'testName="[^"]*"' | while read -r t; do echo "::error title=Failed test::${t}"; done
+            python3 - "$f" <<'PY'
+          import sys, xml.etree.ElementTree as ET
+          ns = {"t": "http://microsoft.com/schemas/VisualStudio/TeamTest/2010"}
+          root = ET.parse(sys.argv[1]).getroot()
+          for r in root.iterfind(".//t:UnitTestResult", ns):
+              if r.get("outcome") == "Failed":
+                  msg = (r.findtext(".//t:Message", default="", namespaces=ns) or "").replace("\n", " ")[:900]
+                  print(f"::error title=Failed test {r.get('testName')}::{msg}")
+          PY
             grep -o '<UnitTestResult [^>]*outcome="NotExecuted"[^>]*>' "$f" | grep -o 'testName="[^"]*"' | head -20 | while read -r t; do echo "::warning title=Skipped test::${t}"; done
           fi
 
