@@ -1,0 +1,40 @@
+
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio Version 17
+VisualStudioVersion = 17.0.31903.59
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "src", "src", "{8A1F2C4E-1B2D-4E5F-9A01-0000000000A1}"
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "tests", "tests", "{8A1F2C4E-1B2D-4E5F-9A01-0000000000A2}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "HobioAdmin.Web", "src\HobioAdmin.Web\HobioAdmin.Web.csproj", "{3C5B8E21-7D41-4A8B-9E10-0000000000B1}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "HobioAdmin.DbTool", "src\HobioAdmin.DbTool\HobioAdmin.DbTool.csproj", "{3C5B8E21-7D41-4A8B-9E10-0000000000B2}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "HobioAdmin.Tests", "tests\HobioAdmin.Tests\HobioAdmin.Tests.csproj", "{3C5B8E21-7D41-4A8B-9E10-0000000000B3}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Any CPU = Debug|Any CPU
+		Release|Any CPU = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{3C5B8E21-7D41-4A8B-9E10-0000000000B1}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{3C5B8E21-7D41-4A8B-9E10-0000000000B1}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{3C5B8E21-7D41-4A8B-9E10-0000000000B1}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{3C5B8E21-7D41-4A8B-9E10-0000000000B1}.Release|Any CPU.Build.0 = Release|Any CPU
+		{3C5B8E21-7D41-4A8B-9E10-0000000000B2}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{3C5B8E21-7D41-4A8B-9E10-0000000000B2}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{3C5B8E21-7D41-4A8B-9E10-0000000000B2}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{3C5B8E21-7D41-4A8B-9E10-0000000000B2}.Release|Any CPU.Build.0 = Release|Any CPU
+		{3C5B8E21-7D41-4A8B-9E10-0000000000B3}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{3C5B8E21-7D41-4A8B-9E10-0000000000B3}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{3C5B8E21-7D41-4A8B-9E10-0000000000B3}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{3C5B8E21-7D41-4A8B-9E10-0000000000B3}.Release|Any CPU.Build.0 = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(NestedProjects) = preSolution
+		{3C5B8E21-7D41-4A8B-9E10-0000000000B1} = {8A1F2C4E-1B2D-4E5F-9A01-0000000000A1}
+		{3C5B8E21-7D41-4A8B-9E10-0000000000B2} = {8A1F2C4E-1B2D-4E5F-9A01-0000000000A1}
+		{3C5B8E21-7D41-4A8B-9E10-0000000000B3} = {8A1F2C4E-1B2D-4E5F-9A01-0000000000A2}
+	EndGlobalSection
+EndGlobal

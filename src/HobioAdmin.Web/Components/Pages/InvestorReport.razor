@@ -1,0 +1,247 @@
+@page "/investor-report"
+@inject IAnalyticsService Analytics
+@inject NavigationManager Navigation
+@inject IJSRuntime JS
+@inject ILogger<InvestorReport> Logger
+
+<PageTitle>Investor report · Hobio Admin</PageTitle>
+
+<div class="page-head no-print">
+    <div>
+        <MudText Typo="Typo.h4" Class="page-title">Investor report</MudText>
+        <MudText Typo="Typo.body2" Class="page-sub">A one-page summary of Hobio's growth. Use "Print / Save as PDF" to share it.</MudText>
+    </div>
+    <div class="page-filters">
+        <PeriodPicker Value="_period" ValueChanged="OnPeriodChanged" />
+        <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.PictureAsPdf"
+                   OnClick="PrintAsync" Disabled="_data is null">Print / Save as PDF</MudButton>
+    </div>
+</div>
+
+@if (!Analytics.IsConfigured)
+{
+    <NotConfigured />
+}
+else if (_error is not null)
+{
+    <LoadError Message="@_error" />
+}
+else if (_data is null)
+{
+    <MudProgressLinear Color="Color.Primary" Indeterminate="true" Class="mb-4" />
+}
+else
+{
+    var c = _data.Current;
+    var p = _data.Previous;
+
+    <article class="report">
+        <header class="report-header">
+            <img src="img/logo.svg" alt="Hobio" class="report-logo" />
+            <div>
+                <h1>Hobio: growth report</h1>
+                <p>@Fmt.RangeText(_data.Range) (@ReportPeriods.Label(_data.Period)) · compared with @Fmt.RangeText(_data.PreviousRange)</p>
+                <p class="report-generated">Generated @Fmt.Date(DateOnly.FromDateTime(TimeZoneInfo.ConvertTimeFromUtc(_data.GeneratedAtUtc, ReportPeriods.HomeTimeZone))) · amounts in CAD · refunds and credits excluded from revenue</p>
+            </div>
+        </header>
+
+        <section>
+            <h2>Headline numbers</h2>
+            <table class="report-table">
+                <thead>
+                    <tr><th scope="col">Metric</th><th scope="col">This period</th><th scope="col">Previous period</th><th scope="col">Change</th></tr>
+                </thead>
+                <tbody>
+                    @Row("New users", Fmt.Number(c.NewUsers), Fmt.Number(p.NewUsers), c.NewUsers, p.NewUsers)
+                    @Row("Active accounts (end of period)", Fmt.Number(c.TotalUsers), Fmt.Number(p.TotalUsers), c.TotalUsers, p.TotalUsers)
+                    @Row("Players who booked", Fmt.Number(c.UniqueBookers), Fmt.Number(p.UniqueBookers), c.UniqueBookers, p.UniqueBookers)
+                    @Row("Repeat bookers (2+ bookings)", Fmt.Percent(c.RepeatBookerRate), Fmt.Percent(p.RepeatBookerRate), c.RepeatBookerRate, p.RepeatBookerRate)
+                    @Row("Events held", Fmt.Number(c.EventsHeld), Fmt.Number(p.EventsHeld), c.EventsHeld, p.EventsHeld)
+                    @Row("Active hosts", Fmt.Number(c.ActiveHosts), Fmt.Number(p.ActiveHosts), c.ActiveHosts, p.ActiveHosts)
+                    @Row("Bookings", Fmt.Number(c.Bookings), Fmt.Number(p.Bookings), c.Bookings, p.Bookings)
+                    @Row("Bookings per event", Fmt.Ratio(c.BookingsPerEvent), Fmt.Ratio(p.BookingsPerEvent), c.BookingsPerEvent, p.BookingsPerEvent)
+                    @Row("Fill rate", Fmt.Percent(c.FillRate), Fmt.Percent(p.FillRate), c.FillRate, p.FillRate)
+                    @Row("Gross booking value", Fmt.Money(c.GrossBookingValue), Fmt.Money(p.GrossBookingValue), (double)c.GrossBookingValue, (double)p.GrossBookingValue)
+                    @Row("Hobio fee revenue", Fmt.Money(c.HobioFeeRevenue), Fmt.Money(p.HobioFeeRevenue), (double)c.HobioFeeRevenue, (double)p.HobioFeeRevenue)
+                    @Row("Take rate", Fmt.Percent(c.TakeRate), Fmt.Percent(p.TakeRate), c.TakeRate, p.TakeRate)
+                    @Row("Average paid event price", Fmt.Money(c.AvgPaidPrice), Fmt.Money(p.AvgPaidPrice), (double?)c.AvgPaidPrice, (double?)p.AvgPaidPrice)
+                    @Row("Paid out to hosts", Fmt.Money(c.PayoutsCompletedAmount), Fmt.Money(p.PayoutsCompletedAmount), (double)c.PayoutsCompletedAmount, (double)p.PayoutsCompletedAmount)
+                    @Row("Refunded / credited", Fmt.Money(c.RefundedAmount), Fmt.Money(p.RefundedAmount), null, null)
+                </tbody>
+            </table>
+        </section>
+
+        <section>
+            <h2>Month by month (last 12 months)</h2>
+            <div class="table-scroll">
+                <table class="report-table">
+                    <thead>
+                        <tr>
+                            <th scope="col">Month</th>
+                            <th scope="col">New users</th>
+                            <th scope="col">Total sign-ups</th>
+                            <th scope="col">Active players</th>
+                            <th scope="col">Active hosts</th>
+                            <th scope="col">Events held</th>
+                            <th scope="col">Bookings</th>
+                            <th scope="col">Gross booking value</th>
+                            <th scope="col">Hobio fees</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var m in _data.Months)
+                        {
+                            <tr>
+                                <th scope="row">@Fmt.Month(m.Month)</th>
+                                <td>@Fmt.Number(m.NewUsers)</td>
+                                <td>@Fmt.Number(m.TotalUsers)</td>
+                                <td>@Fmt.Number(m.ActivePlayers)</td>
+                                <td>@Fmt.Number(m.ActiveHosts)</td>
+                                <td>@Fmt.Number(m.EventsHeld)</td>
+                                <td>@Fmt.Number(m.Bookings)</td>
+                                <td>@Fmt.MoneyShort(m.GrossBookingValue)</td>
+                                <td>@Fmt.MoneyShort(m.HobioFeeRevenue)</td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+            @if (MonthOverMonth is { } mom)
+            {
+                <p class="report-note">
+                    Average month-over-month growth over the last 6 complete months:
+                    new users @Fmt.Percent(mom.Users), bookings @Fmt.Percent(mom.Bookings), gross booking value @Fmt.Percent(mom.Gross).
+                </p>
+            }
+        </section>
+
+        <section>
+            <h2>Top cities</h2>
+            @if (_data.TopCities.Count == 0)
+            {
+                <p class="report-note">No city activity in this period.</p>
+            }
+            else
+            {
+                <table class="report-table">
+                    <thead>
+                        <tr>
+                            <th scope="col">City</th>
+                            <th scope="col">Events held</th>
+                            <th scope="col">Bookings</th>
+                            <th scope="col">Players</th>
+                            <th scope="col">Fill rate</th>
+                            <th scope="col">Gross booking value</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var city in _data.TopCities)
+                        {
+                            <tr>
+                                <th scope="row">@city.CityName</th>
+                                <td>@Fmt.Number(city.EventsHeld)</td>
+                                <td>@Fmt.Number(city.Bookings)</td>
+                                <td>@Fmt.Number(city.Players)</td>
+                                <td>@Fmt.Percent(city.FillRate)</td>
+                                <td>@Fmt.Money(city.GrossBookingValue)</td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            }
+        </section>
+
+        <section>
+            <h2>Retention by sign-up month</h2>
+            <p class="report-note">Share of each month's new users who booked in the sign-up month (Month 0) and in each of the next three months.</p>
+            <CohortTable Cohorts="_data.Cohorts" />
+        </section>
+
+        <footer class="report-footer">
+            Definitions: "events held" are published events scheduled in the period (cancelled and draft events excluded).
+            "Bookings" exclude cancellations and hosts' own spots. "Gross booking value" is what players paid, including fees.
+            "Take rate" is Hobio's fee revenue as a share of gross booking value.
+        </footer>
+    </article>
+}
+
+@code {
+    [SupplyParameterFromQuery(Name = "period")]
+    private string? PeriodKey { get; set; }
+
+    private ReportPeriod _period = ReportPeriod.ThreeMonths;
+    private InvestorReportData? _data;
+    private string? _error;
+
+    private (double? Users, double? Bookings, double? Gross)? MonthOverMonth
+    {
+        get
+        {
+            if (_data is null || _data.Months.Count < 7)
+            {
+                return null;
+            }
+
+            // Complete months only: drop the current (partial) month, then take the last 7 to get 6 changes.
+            var complete = _data.Months.Take(_data.Months.Count - 1).TakeLast(7).ToList();
+            return (
+                AverageGrowth(complete.Select(m => (double)m.NewUsers)),
+                AverageGrowth(complete.Select(m => (double)m.Bookings)),
+                AverageGrowth(complete.Select(m => (double)m.GrossBookingValue)));
+        }
+    }
+
+    private static double? AverageGrowth(IEnumerable<double> values)
+    {
+        var list = values.ToList();
+        var changes = new List<double>();
+        for (var i = 1; i < list.Count; i++)
+        {
+            if (list[i - 1] > 0)
+            {
+                changes.Add((list[i] - list[i - 1]) / list[i - 1]);
+            }
+        }
+
+        return changes.Count > 0 ? changes.Average() : null;
+    }
+
+    private RenderFragment Row(string label, string current, string previous, double? currentValue, double? previousValue) => __builder =>
+    {
+        double? change = currentValue is not null && previousValue is not null ? Fmt.Change(currentValue.Value, previousValue.Value) : null;
+        var cssClass = change is null || change == 0 ? "neutral" : change > 0 ? "up" : "down";
+        var text = currentValue is null || previousValue is null ? "–" : Fmt.ChangeText(change, previousValue == 0);
+        <tr>
+            <th scope="row">@label</th>
+            <td>@current</td>
+            <td>@previous</td>
+            <td class="@($"change {cssClass}")">@text</td>
+        </tr>
+    };
+
+    protected override async Task OnParametersSetAsync()
+    {
+        _period = ReportPeriods.Parse(PeriodKey);
+        if (!Analytics.IsConfigured)
+        {
+            return;
+        }
+
+        _error = null;
+        _data = null;
+        try
+        {
+            _data = await Analytics.GetInvestorReportAsync(_period);
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Failed to load investor report.");
+            _error = ex.Message;
+        }
+    }
+
+    private async Task PrintAsync() => await JS.InvokeVoidAsync("hobioAdmin.print");
+
+    private void OnPeriodChanged(ReportPeriod period) =>
+        Navigation.NavigateTo(Navigation.GetUriWithQueryParameter("period", ReportPeriods.Key(period)));
+}

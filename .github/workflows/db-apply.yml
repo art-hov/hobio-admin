@@ -1,0 +1,48 @@
+name: Apply analytics views and read-only login
+
+# Creates/updates the [analytics] views in the Tushpa database and the read-only login the portal uses.
+# Safe to re-run. Needs a runner that can reach RDS: Tushpa deploys its database from a self-hosted runner,
+# so this uses the same "self-hosted" label. Make that runner available to this repository
+# (GitHub > Settings > Actions > Runners), or run the DbTool by hand (see README).
+#
+# GitHub environment (Dev or Prod) secrets:
+#   AWS_RDS_ENDPOINT, AWS_RDS_DBNAME, AWS_RDS_USERNAME, AWS_RDS_PASSWORD  (same values Tushpa's DB deploy uses)
+#   HOBIO_READER_PASSWORD   password for the read-only login (also put it in the app's connection string secret)
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: GitHub environment
+        type: choice
+        options: [Dev, Prod]
+        default: Dev
+      what:
+        description: What to apply
+        type: choice
+        options: [all, views, reader]
+        default: all
+
+jobs:
+  apply:
+    runs-on: self-hosted
+    environment: ${{ inputs.environment }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Apply
+        env:
+          RDS_ENDPOINT: ${{ secrets.AWS_RDS_ENDPOINT }}
+          RDS_DBNAME: ${{ secrets.AWS_RDS_DBNAME }}
+          RDS_USERNAME: ${{ secrets.AWS_RDS_USERNAME }}
+          RDS_PASSWORD: ${{ secrets.AWS_RDS_PASSWORD }}
+          HOBIO_READER_PASSWORD: ${{ secrets.HOBIO_READER_PASSWORD }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          export HOBIO_DB_CONNECTION="Server=${RDS_ENDPOINT},1433;Database=${RDS_DBNAME};User Id=${RDS_USERNAME};Password=${RDS_PASSWORD};Encrypt=True;TrustServerCertificate=True"
+          dotnet run --project src/HobioAdmin.DbTool --configuration Release -- "${{ inputs.what }}"

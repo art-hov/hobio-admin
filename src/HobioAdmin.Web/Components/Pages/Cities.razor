@@ -1,0 +1,150 @@
+@page "/cities"
+@inject IAnalyticsService Analytics
+@inject NavigationManager Navigation
+@inject ILogger<Cities> Logger
+
+<PageTitle>Cities · Hobio Admin</PageTitle>
+
+<div class="page-head">
+    <div>
+        <MudText Typo="Typo.h4" Class="page-title">Cities &amp; weekdays</MudText>
+        @if (_data is not null)
+        {
+            <MudText Typo="Typo.body2" Class="page-sub">Events held @Fmt.RangeText(_data.Range), by local start day</MudText>
+        }
+    </div>
+    <div class="page-filters">
+        <PeriodPicker Value="_period" ValueChanged="OnPeriodChanged" />
+    </div>
+</div>
+
+@if (!Analytics.IsConfigured)
+{
+    <NotConfigured />
+}
+else if (_error is not null)
+{
+    <LoadError Message="@_error" />
+}
+else if (_data is null)
+{
+    <MudProgressLinear Color="Color.Primary" Indeterminate="true" Class="mb-4" />
+}
+else
+{
+    <MudPaper Class="pa-4 mb-6" Elevation="0" Outlined="true">
+        <MudText Typo="Typo.subtitle1" Class="chart-title mb-1">Which days events happen, per city</MudText>
+        <MudText Typo="Typo.caption" Class="chart-sub d-block mb-3">Number of events held. Darker means more events.</MudText>
+
+        @if (_data.Weekdays.Cities.Count == 0)
+        {
+            <div class="chart-empty">No events held in this period.</div>
+        }
+        else
+        {
+            <div class="table-scroll">
+                <table class="heatmap">
+                    <thead>
+                        <tr>
+                            <th scope="col">City</th>
+                            @foreach (var day in WeekdayMatrix.DayNames)
+                            {
+                                <th scope="col">@day</th>
+                            }
+                            <th scope="col">Total</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @for (var c = 0; c < _data.Weekdays.Cities.Count; c++)
+                        {
+                            var row = c;
+                            var total = 0;
+                            <tr>
+                                <th scope="row">@_data.Weekdays.Cities[row]</th>
+                                @for (var d = 0; d < 7; d++)
+                                {
+                                    var value = _data.Weekdays.Events[row, d];
+                                    total += value;
+                                    <td style="@CellStyle(value)" title="@($"{_data.Weekdays.Cities[row]}, {WeekdayMatrix.DayNames[d]}: {value} events")">@(value == 0 ? "·" : value.ToString(Fmt.Culture))</td>
+                                }
+                                <td class="total">@Fmt.Number(total)</td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+        }
+    </MudPaper>
+
+    <MudPaper Class="pa-4" Elevation="0" Outlined="true">
+        <MudText Typo="Typo.subtitle1" Class="chart-title mb-3">City summary</MudText>
+        <MudTable Items="_data.Cities" Dense="true" Hover="true" Elevation="0" Breakpoint="Breakpoint.Sm" HorizontalScrollbar="true">
+            <HeaderContent>
+                <MudTh>City</MudTh>
+                <MudTh Style="text-align:right">Events held</MudTh>
+                <MudTh Style="text-align:right">Bookings</MudTh>
+                <MudTh Style="text-align:right">Players</MudTh>
+                <MudTh Style="text-align:right">Active hosts</MudTh>
+                <MudTh Style="text-align:right">Fill rate</MudTh>
+                <MudTh Style="text-align:right">Avg paid price</MudTh>
+                <MudTh Style="text-align:right">Gross booking value</MudTh>
+                <MudTh Style="text-align:right">Hobio fees</MudTh>
+            </HeaderContent>
+            <RowTemplate>
+                <MudTd DataLabel="City">@context.CityName</MudTd>
+                <MudTd DataLabel="Events held" Style="text-align:right">@Fmt.Number(context.EventsHeld)</MudTd>
+                <MudTd DataLabel="Bookings" Style="text-align:right">@Fmt.Number(context.Bookings)</MudTd>
+                <MudTd DataLabel="Players" Style="text-align:right">@Fmt.Number(context.Players)</MudTd>
+                <MudTd DataLabel="Active hosts" Style="text-align:right">@Fmt.Number(context.ActiveHosts)</MudTd>
+                <MudTd DataLabel="Fill rate" Style="text-align:right">@Fmt.Percent(context.FillRate)</MudTd>
+                <MudTd DataLabel="Avg paid price" Style="text-align:right">@Fmt.Money(context.AvgPaidPrice)</MudTd>
+                <MudTd DataLabel="Gross booking value" Style="text-align:right">@Fmt.Money(context.GrossBookingValue)</MudTd>
+                <MudTd DataLabel="Hobio fees" Style="text-align:right">@Fmt.Money(context.HobioFeeRevenue)</MudTd>
+            </RowTemplate>
+            <NoRecordsContent>
+                <div class="chart-empty">No city activity in this period.</div>
+            </NoRecordsContent>
+        </MudTable>
+    </MudPaper>
+}
+
+@code {
+    [SupplyParameterFromQuery(Name = "period")]
+    private string? PeriodKey { get; set; }
+
+    private ReportPeriod _period = ReportPeriod.ThreeMonths;
+    private CitiesData? _data;
+    private string? _error;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        _period = ReportPeriods.Parse(PeriodKey);
+        if (!Analytics.IsConfigured)
+        {
+            return;
+        }
+
+        _error = null;
+        _data = null;
+        try
+        {
+            _data = await Analytics.GetCitiesAsync(_period);
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Failed to load cities.");
+            _error = ex.Message;
+        }
+    }
+
+    private string CellStyle(int value)
+    {
+        var max = Math.Max(1, _data?.Weekdays.MaxCell ?? 1);
+        var alpha = value == 0 ? 0 : 0.12 + 0.78 * value / max;
+        var color = alpha > 0.55 ? "#ffffff" : "#333333";
+        return FormattableString.Invariant($"background-color: rgba(39,167,74,{alpha:F2}); color: {color};");
+    }
+
+    private void OnPeriodChanged(ReportPeriod period) =>
+        Navigation.NavigateTo(Navigation.GetUriWithQueryParameter("period", ReportPeriods.Key(period)));
+}

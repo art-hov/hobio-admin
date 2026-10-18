@@ -1,0 +1,57 @@
+@page "/retention"
+@inject IAnalyticsService Analytics
+@inject ILogger<Retention> Logger
+
+<PageTitle>Retention · Hobio Admin</PageTitle>
+
+<div class="page-head">
+    <div>
+        <MudText Typo="Typo.h4" Class="page-title">Retention</MudText>
+        <MudText Typo="Typo.body2" Class="page-sub">
+            Users grouped by sign-up month (last 12 months). Each cell is the share of that group who booked at least once
+            in that month after signing up. Month 0 is the sign-up month.
+        </MudText>
+    </div>
+</div>
+
+@if (!Analytics.IsConfigured)
+{
+    <NotConfigured />
+}
+else if (_error is not null)
+{
+    <LoadError Message="@_error" />
+}
+else if (_cohorts is null)
+{
+    <MudProgressLinear Color="Color.Primary" Indeterminate="true" Class="mb-4" />
+}
+else
+{
+    <MudPaper Class="pa-4" Elevation="0" Outlined="true">
+        <CohortTable Cohorts="_cohorts" />
+    </MudPaper>
+}
+
+@code {
+    private IReadOnlyList<CohortRow>? _cohorts;
+    private string? _error;
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (!Analytics.IsConfigured)
+        {
+            return;
+        }
+
+        try
+        {
+            _cohorts = await Analytics.GetCohortsAsync();
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Failed to load cohorts.");
+            _error = ex.Message;
+        }
+    }
+}

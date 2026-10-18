@@ -1,0 +1,66 @@
+@* A titled chart. Line or bar, driven by a TimeSeries from AnalyticsService. *@
+<MudPaper Class="chart-card pa-4" Elevation="0" Outlined="true">
+    <div class="chart-head">
+        <MudText Typo="Typo.subtitle1" Class="chart-title">@Title</MudText>
+        @if (!string.IsNullOrEmpty(Subtitle))
+        {
+            <MudText Typo="Typo.caption" Class="chart-sub">@Subtitle</MudText>
+        }
+    </div>
+    @if (Data is null)
+    {
+        <MudSkeleton SkeletonType="SkeletonType.Rectangle" Height="280px" />
+    }
+    else if (Data.IsEmpty)
+    {
+        <div class="chart-empty">No data for this period yet.</div>
+    }
+    else
+    {
+        <MudChart ChartType="ChartType"
+                  ChartSeries="@_series"
+                  XAxisLabels="@_labels"
+                  ChartOptions="@_options"
+                  Width="100%"
+                  Height="@Height" />
+    }
+</MudPaper>
+
+@code {
+    [Parameter, EditorRequired] public string Title { get; set; } = string.Empty;
+    [Parameter] public string? Subtitle { get; set; }
+    [Parameter] public TimeSeries? Data { get; set; }
+    [Parameter] public ChartType ChartType { get; set; } = ChartType.Line;
+    [Parameter] public string Height { get; set; } = "280px";
+
+    /// <summary>Show only these series (by index). Null shows all.</summary>
+    [Parameter] public int[]? SeriesIndexes { get; set; }
+
+    private List<ChartSeries> _series = [];
+    private string[] _labels = [];
+    private ChartOptions _options = new();
+
+    protected override void OnParametersSet()
+    {
+        if (Data is null)
+        {
+            return;
+        }
+
+        var selected = SeriesIndexes is null
+            ? Data.Series
+            : SeriesIndexes.Where(i => i < Data.Series.Count).Select(i => Data.Series[i]).ToList();
+
+        _series = selected.Select(s => new ChartSeries { Name = s.Name, Data = s.Values }).ToList();
+        _labels = Data.Labels.ToArray();
+
+        var max = selected.SelectMany(s => s.Values).DefaultIfEmpty(0).Max();
+        _options = new ChartOptions
+        {
+            ChartPalette = HobioTheme.ChartPalette,
+            YAxisTicks = Fmt.NiceTickStep(max),
+            LineStrokeWidth = 3,
+            InterpolationOption = InterpolationOption.Straight,
+        };
+    }
+}

@@ -1,0 +1,18 @@
+@* Period buttons (1, 2, 3, 6 months, 1 year). The selection is kept in the URL (?period=3m) so pages can be shared. *@
+<MudButtonGroup Variant="Variant.Outlined" Color="Color.Primary" Size="Size.Small" OverrideStyles="false" aria-label="Reporting period">
+    @foreach (var p in ReportPeriods.All)
+    {
+        var period = p;
+        <MudButton Variant="@(period == Value ? Variant.Filled : Variant.Outlined)"
+                   Color="Color.Primary"
+                   DropShadow="false"
+                   OnClick="@(() => ValueChanged.InvokeAsync(period))">
+            @ReportPeriods.Label(period)
+        </MudButton>
+    }
+</MudButtonGroup>
+
+@code {
+    [Parameter] public ReportPeriod Value { get; set; }
+    [Parameter] public EventCallback<ReportPeriod> ValueChanged { get; set; }
+}

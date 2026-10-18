@@ -1,0 +1,79 @@
+name: Provision AWS environment
+
+# Creates or updates the Elastic Beanstalk environment for Hobio Admin (run once per environment,
+# and again whenever you change the settings below). Deployments then happen automatically from CI/CD.
+#
+# Uses the GitHub environment you pick (Dev or Prod):
+#   secret   AWS_ROLE_ARN            IAM role GitHub can assume via OIDC (see README for permissions)
+#   variable EB_APP_NAME             optional, default hobio-admin
+#   variable ADMIN_ALLOWED_EMAILS    comma separated admin emails
+#   variable FIREBASE_WEB_API_KEY    Firebase web API key
+#   variable AWS_SECRET_IDS          comma separated Secrets Manager secret names the app may read
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: GitHub environment (holds the AWS role and settings)
+        type: choice
+        options: [Dev, Prod]
+        default: Dev
+      env_name:
+        description: Elastic Beanstalk environment name
+        default: hobio-admin-dev
+        required: true
+      vpc_id:
+        description: VPC id of the Tushpa RDS instance (vpc-...)
+        required: true
+      subnets:
+        description: Comma separated subnet ids in that VPC (2+ AZs when using HTTPS)
+        required: true
+      rds_security_group_id:
+        description: Security group of the Tushpa RDS instance (sg-...)
+        required: true
+      certificate_arn:
+        description: ACM certificate ARN for the portal domain (empty = single instance, HTTP, testing only)
+        required: false
+        default: ''
+      instance_type:
+        description: EC2 instance type
+        default: t3.small
+      associate_public_ip:
+        description: Give instances a public IP (false if the subnets are private with a NAT gateway)
+        type: boolean
+        default: true
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  provision:
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.environment }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ca-central-1
+
+      - name: Create or update environment
+        env:
+          AWS_REGION: ca-central-1
+          APP_NAME: ${{ vars.EB_APP_NAME || 'hobio-admin' }}
+          ENV_NAME: ${{ inputs.env_name }}
+          VPC_ID: ${{ inputs.vpc_id }}
+          SUBNETS: ${{ inputs.subnets }}
+          RDS_SECURITY_GROUP_ID: ${{ inputs.rds_security_group_id }}
+          CERTIFICATE_ARN: ${{ inputs.certificate_arn }}
+          INSTANCE_TYPE: ${{ inputs.instance_type }}
+          ASSOCIATE_PUBLIC_IP: ${{ inputs.associate_public_ip }}
+          SECRET_IDS: ${{ vars.AWS_SECRET_IDS }}
+          ADMIN_ALLOWED_EMAILS: ${{ vars.ADMIN_ALLOWED_EMAILS }}
+          FIREBASE_WEB_API_KEY: ${{ vars.FIREBASE_WEB_API_KEY }}
+          ASPNETCORE_ENVIRONMENT: ${{ inputs.environment == 'Prod' && 'Production' || 'Staging' }}
+        run: bash scripts/aws/create-environment.sh

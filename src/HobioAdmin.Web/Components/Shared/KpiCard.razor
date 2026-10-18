@@ -1,0 +1,39 @@
+<MudPaper Class="kpi-card pa-4" Elevation="0" Outlined="true">
+    <MudText Typo="Typo.caption" Class="kpi-label">@Label</MudText>
+    <MudText Typo="Typo.h5" Class="kpi-value">@Value</MudText>
+    @if (ShowChange)
+    {
+        <MudText Typo="Typo.caption" Class="@ChangeClass">
+            @Fmt.ChangeText(Change, PreviousWasZero) <span class="kpi-vs">vs previous period</span>
+        </MudText>
+    }
+    else if (!string.IsNullOrEmpty(Hint))
+    {
+        <MudText Typo="Typo.caption" Class="kpi-vs">@Hint</MudText>
+    }
+</MudPaper>
+
+@code {
+    [Parameter, EditorRequired] public string Label { get; set; } = string.Empty;
+    [Parameter, EditorRequired] public string Value { get; set; } = string.Empty;
+    [Parameter] public double? Current { get; set; }
+    [Parameter] public double? Previous { get; set; }
+    [Parameter] public string? Hint { get; set; }
+
+    /// <summary>For costs, a decrease is good.</summary>
+    [Parameter] public bool LowerIsBetter { get; set; }
+
+    private bool ShowChange => Current is not null && Previous is not null;
+    private bool PreviousWasZero => Previous == 0;
+    private double? Change => ShowChange ? Fmt.Change(Current!.Value, Previous!.Value) : null;
+
+    private string ChangeClass
+    {
+        get
+        {
+            if (Change is null || Change == 0) return "kpi-change neutral";
+            var good = LowerIsBetter ? Change < 0 : Change > 0;
+            return good ? "kpi-change up" : "kpi-change down";
+        }
+    }
+}

@@ -1,0 +1,141 @@
+@page "/"
+@inject IAnalyticsService Analytics
+@inject NavigationManager Navigation
+@inject ILogger<Overview> Logger
+
+<PageTitle>Overview · Hobio Admin</PageTitle>
+
+<div class="page-head">
+    <div>
+        <MudText Typo="Typo.h4" Class="page-title">Overview</MudText>
+        @if (_data is not null)
+        {
+            <MudText Typo="Typo.body2" Class="page-sub">@Fmt.RangeText(_data.Range) · compared with @Fmt.RangeText(_data.PreviousRange)</MudText>
+        }
+    </div>
+    <div class="page-filters">
+        <MudSelect T="int?" Value="_cityId" ValueChanged="OnCityChanged" Label="City" Dense="true" Margin="Margin.Dense"
+                   Variant="Variant.Outlined" Class="city-select" Clearable="false">
+            <MudSelectItem T="int?" Value="null">All cities</MudSelectItem>
+            @foreach (var city in _cities)
+            {
+                <MudSelectItem T="int?" Value="city.CityId">@city.CityName</MudSelectItem>
+            }
+        </MudSelect>
+        <PeriodPicker Value="_period" ValueChanged="OnPeriodChanged" />
+    </div>
+</div>
+
+@if (!Analytics.IsConfigured)
+{
+    <NotConfigured />
+}
+else if (_error is not null)
+{
+    <LoadError Message="@_error" />
+}
+else if (_data is null)
+{
+    <MudProgressLinear Color="Color.Primary" Indeterminate="true" Class="mb-4" />
+}
+else
+{
+    var c = _data.Current;
+    var p = _data.Previous;
+
+    <MudText Typo="Typo.overline" Class="section-label">Growth</MudText>
+    <div class="kpi-grid">
+        <KpiCard Label="New users" Value="@Fmt.Number(c.NewUsers)" Current="c.NewUsers" Previous="p.NewUsers" />
+        <KpiCard Label="Active accounts" Value="@Fmt.Number(c.TotalUsers)" Hint="All time, excluding deleted" />
+        <KpiCard Label="Players who booked" Value="@Fmt.Number(c.UniqueBookers)" Current="c.UniqueBookers" Previous="p.UniqueBookers" />
+        <KpiCard Label="Repeat bookers" Value="@Fmt.Percent(c.RepeatBookerRate)" Current="c.RepeatBookerRate" Previous="p.RepeatBookerRate" />
+    </div>
+
+    <MudText Typo="Typo.overline" Class="section-label">Marketplace</MudText>
+    <div class="kpi-grid">
+        <KpiCard Label="Events held" Value="@Fmt.Number(c.EventsHeld)" Current="c.EventsHeld" Previous="p.EventsHeld" />
+        <KpiCard Label="Bookings" Value="@Fmt.Number(c.Bookings)" Current="c.Bookings" Previous="p.Bookings" />
+        <KpiCard Label="Active hosts" Value="@Fmt.Number(c.ActiveHosts)" Current="c.ActiveHosts" Previous="p.ActiveHosts" />
+        <KpiCard Label="Fill rate" Value="@Fmt.Percent(c.FillRate)" Current="c.FillRate" Previous="p.FillRate" />
+    </div>
+
+    <MudText Typo="Typo.overline" Class="section-label">Money</MudText>
+    <div class="kpi-grid">
+        <KpiCard Label="Gross booking value" Value="@Fmt.Money(c.GrossBookingValue)" Current="(double)c.GrossBookingValue" Previous="(double)p.GrossBookingValue" />
+        <KpiCard Label="Hobio fee revenue" Value="@Fmt.Money(c.HobioFeeRevenue)" Current="(double)c.HobioFeeRevenue" Previous="(double)p.HobioFeeRevenue" />
+        <KpiCard Label="Average paid event price" Value="@Fmt.Money(c.AvgPaidPrice)" Current="(double?)c.AvgPaidPrice" Previous="(double?)p.AvgPaidPrice" />
+        <KpiCard Label="Take rate" Value="@Fmt.Percent(c.TakeRate)" Hint="Hobio fees ÷ gross booking value" />
+    </div>
+
+    <div class="chart-grid">
+        <ChartCard Title="New users" Subtitle="@BucketText" Data="_data.Users" SeriesIndexes="@(new[] { 0 })" ChartType="ChartType.Bar" />
+        <ChartCard Title="Total sign-ups" Subtitle="Cumulative, all time" Data="_data.Users" SeriesIndexes="@(new[] { 1 })" ChartType="ChartType.Line" />
+        <ChartCard Title="Events held and bookings" Subtitle="@BucketText" Data="_data.Activity" ChartType="ChartType.Bar" />
+        <ChartCard Title="Average paid event price" Subtitle="Paid events held, CAD" Data="_data.AveragePrice" ChartType="ChartType.Line" />
+        <ChartCard Title="Revenue" Subtitle="Gross booking value and Hobio fees, CAD, refunds excluded" Data="_data.Revenue" ChartType="ChartType.Line" />
+    </div>
+}
+
+@code {
+    [SupplyParameterFromQuery(Name = "period")]
+    private string? PeriodKey { get; set; }
+
+    [SupplyParameterFromQuery(Name = "city")]
+    private int? CityQuery { get; set; }
+
+    private ReportPeriod _period = ReportPeriod.ThreeMonths;
+    private int? _cityId;
+    private IReadOnlyList<CityOption> _cities = [];
+    private OverviewData? _data;
+    private string? _error;
+
+    private string BucketText => _data?.Range.Bucket switch
+    {
+        BucketSize.Day => "Per day",
+        BucketSize.Week => "Per week (Mon–Sun)",
+        _ => "Per month",
+    };
+
+    protected override async Task OnParametersSetAsync()
+    {
+        _period = ReportPeriods.Parse(PeriodKey);
+        _cityId = CityQuery;
+        await LoadAsync();
+    }
+
+    private async Task LoadAsync()
+    {
+        if (!Analytics.IsConfigured)
+        {
+            return;
+        }
+
+        _error = null;
+        _data = null;
+        try
+        {
+            if (_cities.Count == 0)
+            {
+                _cities = await Analytics.GetCityOptionsAsync();
+            }
+
+            _data = await Analytics.GetOverviewAsync(_period, _cityId);
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Failed to load overview.");
+            _error = ex.Message;
+        }
+    }
+
+    private void OnPeriodChanged(ReportPeriod period) => Navigate(period, _cityId);
+
+    private void OnCityChanged(int? cityId) => Navigate(_period, cityId);
+
+    private void Navigate(ReportPeriod period, int? cityId) =>
+        Navigation.NavigateTo(Navigation.GetUriWithQueryParameters(new Dictionary<string, object?>
+        {
+            ["period"] = ReportPeriods.Key(period),
+            ["city"] = cityId,
+        }));
+}

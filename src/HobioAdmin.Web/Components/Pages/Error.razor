@@ -1,0 +1,29 @@
+@page "/error"
+@attribute [AllowAnonymous]
+@attribute [ExcludeFromInteractiveRouting]
+@layout EmptyLayout
+@using System.Diagnostics
+
+<PageTitle>Error · Hobio Admin</PageTitle>
+
+<main class="login-page">
+    <section class="login-card">
+        <img src="img/logo.svg" alt="Hobio" class="login-logo" />
+        <h1>Something went wrong</h1>
+        <p class="login-sub">The error has been logged. Try again, or go back to the <a href="/">dashboard</a>.</p>
+        @if (!string.IsNullOrEmpty(RequestId))
+        {
+            <p class="login-sub"><small>Request ID: <code>@RequestId</code></small></p>
+        }
+    </section>
+</main>
+
+@code {
+    [CascadingParameter]
+    private HttpContext? HttpContext { get; set; }
+
+    private string? RequestId { get; set; }
+
+    protected override void OnInitialized() =>
+        RequestId = Activity.Current?.Id ?? HttpContext?.TraceIdentifier;
+}

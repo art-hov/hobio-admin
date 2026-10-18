@@ -1,0 +1,60 @@
+@if (Cohorts.Count == 0)
+{
+    <div class="chart-empty">No sign-ups in the last 12 months.</div>
+}
+else
+{
+    <div class="table-scroll">
+        <table class="heatmap cohort">
+            <thead>
+                <tr>
+                    <th scope="col">Sign-up month</th>
+                    <th scope="col">Users</th>
+                    <th scope="col">Month 0</th>
+                    <th scope="col">Month 1</th>
+                    <th scope="col">Month 2</th>
+                    <th scope="col">Month 3</th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (var row in Cohorts)
+                {
+                    var month = DateOnly.FromDateTime(row.CohortMonth);
+                    <tr>
+                        <th scope="row">@Fmt.Month(month)</th>
+                        <td class="total">@Fmt.Number(row.CohortSize)</td>
+                        @foreach (var (count, offset) in new[] { (row.Month0, 0), (row.Month1, 1), (row.Month2, 2), (row.Month3, 3) })
+                        {
+                            if (IsFuture(month, offset))
+                            {
+                                <td class="future">–</td>
+                            }
+                            else
+                            {
+                                var share = row.CohortSize > 0 ? (double)count / row.CohortSize : 0;
+                                <td style="@CellStyle(share)" title="@($"{count} of {row.CohortSize} users")">@Fmt.Percent(share, 0)</td>
+                            }
+                        }
+                    </tr>
+                }
+            </tbody>
+        </table>
+    </div>
+}
+
+@code {
+    [Parameter, EditorRequired] public IReadOnlyList<CohortRow> Cohorts { get; set; } = [];
+
+    private static bool IsFuture(DateOnly cohortMonth, int offset)
+    {
+        var today = DateOnly.FromDateTime(TimeZoneInfo.ConvertTimeFromUtc(DateTime.UtcNow, ReportPeriods.HomeTimeZone));
+        return cohortMonth.AddMonths(offset) > new DateOnly(today.Year, today.Month, 1);
+    }
+
+    private static string CellStyle(double share)
+    {
+        var alpha = share <= 0 ? 0 : 0.12 + 0.78 * Math.Min(1, share);
+        var color = alpha > 0.55 ? "#ffffff" : "#333333";
+        return FormattableString.Invariant($"background-color: rgba(39,167,74,{alpha:F2}); color: {color};");
+    }
+}

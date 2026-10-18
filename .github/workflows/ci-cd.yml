@@ -1,0 +1,151 @@
+name: CI/CD
+
+# main    -> build, test, deploy to Dev
+# release -> build, test, deploy to Prod
+# Pull requests build and test only.
+
+on:
+  push:
+    branches: [main, release]
+  pull_request:
+    branches: [main, release]
+  workflow_dispatch:
+
+permissions:
+  id-token: write   # GitHub OIDC -> AWS role
+  contents: read
+
+concurrency:
+  group: ci-cd-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  DOTNET_VERSION: '10.0.x'
+  AWS_REGION: ca-central-1
+
+jobs:
+  build-test:
+    name: Build and test
+    runs-on: ubuntu-latest
+
+    services:
+      sql:
+        image: mcr.microsoft.com/mssql/server:2022-latest
+        env:
+          ACCEPT_EULA: 'Y'
+          MSSQL_SA_PASSWORD: 'CiOnly!Passw0rd-2026'
+        ports:
+          - 1433:1433
+        options: >-
+          --health-cmd "/opt/mssql-tools18/bin/sqlcmd -C -S localhost -U sa -P 'CiOnly!Passw0rd-2026' -Q 'SELECT 1' -b"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 30
+
+    env:
+      # Throwaway SQL Server inside the CI job, used by the database tests. Not a real credential.
+      HOBIO_TEST_SQL: 'Server=localhost,1433;User Id=sa;Password=CiOnly!Passw0rd-2026;TrustServerCertificate=True;Encrypt=False'
+      HOBIO_REQUIRE_SQL_TESTS: '1'
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: ${{ env.DOTNET_VERSION }}
+
+      - name: Restore
+        run: dotnet restore HobioAdmin.sln
+
+      - name: Build
+        run: dotnet build HobioAdmin.sln --configuration Release --no-restore
+
+      - name: Test
+        run: dotnet test HobioAdmin.sln --configuration Release --no-build --logger "console;verbosity=normal"
+
+      - name: Publish
+        if: github.event_name != 'pull_request'
+        run: dotnet publish src/HobioAdmin.Web/HobioAdmin.Web.csproj --configuration Release --no-restore --output ./publish
+
+      - name: Add Elastic Beanstalk files
+        if: github.event_name != 'pull_request'
+        run: |
+          cp deploy/Procfile ./publish/Procfile
+          cp -r deploy/.platform ./publish/.platform
+
+      - name: Zip bundle
+        if: github.event_name != 'pull_request'
+        working-directory: ./publish
+        run: zip -qr ../deploy.zip . -x '*.pdb'
+
+      - name: Upload bundle
+        if: github.event_name != 'pull_request'
+        uses: actions/upload-artifact@v4
+        with:
+          name: deploy-zip
+          path: deploy.zip
+          retention-days: 3
+
+  deploy:
+    name: Deploy (${{ github.ref == 'refs/heads/release' && 'Prod' || 'Dev' }})
+    needs: build-test
+    if: github.event_name != 'pull_request' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/release')
+    runs-on: ubuntu-latest
+    environment: ${{ github.ref == 'refs/heads/release' && 'Prod' || 'Dev' }}
+    steps:
+      - name: Check deployment settings
+        id: config
+        env:
+          ROLE: ${{ secrets.AWS_ROLE_ARN }}
+          APP: ${{ vars.EB_APP_NAME }}
+          ENVNAME: ${{ vars.EB_ENV_NAME }}
+        run: |
+          if [ -z "$ROLE" ] || [ -z "$ENVNAME" ]; then
+            echo "::notice title=Deploy skipped::Set the AWS_ROLE_ARN secret and the EB_ENV_NAME variable on this GitHub environment (see README), then re-run."
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+            echo "app=${APP:-hobio-admin}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Download bundle
+        if: steps.config.outputs.ready == 'true'
+        uses: actions/download-artifact@v4
+        with:
+          name: deploy-zip
+
+      - name: Configure AWS credentials
+        if: steps.config.outputs.ready == 'true'
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Deploy to Elastic Beanstalk
+        if: steps.config.outputs.ready == 'true'
+        env:
+          APP: ${{ steps.config.outputs.app }}
+          ENVNAME: ${{ vars.EB_ENV_NAME }}
+        run: |
+          set -euo pipefail
+          LABEL="${GITHUB_SHA::12}-${GITHUB_RUN_NUMBER}"
+          BUCKET=$(aws elasticbeanstalk create-storage-location --query S3Bucket --output text)
+          KEY="hobio-admin/${ENVNAME}/deploy-${LABEL}.zip"
+          aws s3 cp deploy.zip "s3://${BUCKET}/${KEY}"
+          aws elasticbeanstalk create-application-version \
+            --application-name "$APP" \
+            --version-label "$LABEL" \
+            --description "${GITHUB_REF_NAME} ${GITHUB_SHA::12}" \
+            --source-bundle "S3Bucket=${BUCKET},S3Key=${KEY}"
+          aws elasticbeanstalk update-environment \
+            --application-name "$APP" \
+            --environment-name "$ENVNAME" \
+            --version-label "$LABEL"
+          aws elasticbeanstalk wait environment-updated \
+            --application-name "$APP" \
+            --environment-names "$ENVNAME"
+          aws elasticbeanstalk describe-environments \
+            --application-name "$APP" --environment-names "$ENVNAME" \
+            --query 'Environments[0].[Status,Health,CNAME,VersionLabel]' --output table
