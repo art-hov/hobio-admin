@@ -46,7 +46,22 @@ jobs:
         run: pwsh tests/HobioAdmin.Tests/bin/Release/net10.0/playwright.ps1 install --with-deps chromium
 
       - name: Capture
-        run: dotnet test tests/HobioAdmin.Tests/HobioAdmin.Tests.csproj --configuration Release --no-build --filter "Category=Screenshots" --logger "console;verbosity=normal"
+        run: dotnet test tests/HobioAdmin.Tests/HobioAdmin.Tests.csproj --configuration Release --no-build --filter "Category=Screenshots" --logger "console;verbosity=normal" --logger "trx;LogFileName=shots.trx" --results-directory ./TestResults
+
+      - name: Test summary
+        if: always()
+        run: |
+          f=$(find ./TestResults -name '*.trx' | head -1)
+          [ -z "$f" ] && exit 0
+          python3 - "$f" <<'PY'
+          import sys, xml.etree.ElementTree as ET
+          ns = {"t": "http://microsoft.com/schemas/VisualStudio/TeamTest/2010"}
+          root = ET.parse(sys.argv[1]).getroot()
+          for r in root.iterfind(".//t:UnitTestResult", ns):
+              msg = (r.findtext(".//t:Message", default="", namespaces=ns) or "").replace("\n", " ")[:900]
+              stack = (r.findtext(".//t:StackTrace", default="", namespaces=ns) or "").replace("\n", " ")[:600]
+              print(f"::notice title={r.get('outcome')} {r.get('testName')}::{msg} || {stack}")
+          PY
 
       - name: Publish to ci-screenshots branch
         run: |
