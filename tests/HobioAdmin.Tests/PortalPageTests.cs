@@ -22,8 +22,8 @@ public sealed class PortalPageTests(SqlServerFixture db)
 {
     private const string AdminEmail = "admin@hobio.ca";
 
-    private WebApplicationFactory<Program> CreateFactory(bool signedIn) =>
-        new WebApplicationFactory<Program>().WithWebHostBuilder(builder =>
+    private WebApplicationFactory<HobioAdmin.Web.WebAppMarker> CreateFactory(bool signedIn) =>
+        new WebApplicationFactory<HobioAdmin.Web.WebAppMarker>().WithWebHostBuilder(builder =>
         {
             builder.UseEnvironment("Testing");
             builder.UseSetting("Admin:AllowedEmails", AdminEmail);
@@ -40,16 +40,16 @@ public sealed class PortalPageTests(SqlServerFixture db)
                 {
                     services.AddAuthentication(options =>
                         {
-                            options.DefaultScheme = TestAuthHandler.Scheme;
-                            options.DefaultAuthenticateScheme = TestAuthHandler.Scheme;
-                            options.DefaultChallengeScheme = TestAuthHandler.Scheme;
+                            options.DefaultScheme = TestAuthHandler.SchemeName;
+                            options.DefaultAuthenticateScheme = TestAuthHandler.SchemeName;
+                            options.DefaultChallengeScheme = TestAuthHandler.SchemeName;
                         })
-                        .AddScheme<AuthenticationSchemeOptions, TestAuthHandler>(TestAuthHandler.Scheme, _ => { });
+                        .AddScheme<AuthenticationSchemeOptions, TestAuthHandler>(TestAuthHandler.SchemeName, _ => { });
                 }
             });
         });
 
-    private static HttpClient Client(WebApplicationFactory<Program> factory) =>
+    private static HttpClient Client(WebApplicationFactory<HobioAdmin.Web.WebAppMarker> factory) =>
         factory.CreateClient(new WebApplicationFactoryClientOptions { AllowAutoRedirect = false });
 
     [Fact]
@@ -226,7 +226,7 @@ public sealed class PortalPageTests(SqlServerFixture db)
     private sealed class TestAuthHandler(IOptionsMonitor<AuthenticationSchemeOptions> options, ILoggerFactory logger, UrlEncoder encoder)
         : AuthenticationHandler<AuthenticationSchemeOptions>(options, logger, encoder)
     {
-        public const string Scheme = "Test";
+        public const string SchemeName = "Test";
 
         protected override Task<AuthenticateResult> HandleAuthenticateAsync()
         {
@@ -236,9 +236,9 @@ public sealed class PortalPageTests(SqlServerFixture db)
                 new Claim(ClaimTypes.Email, AdminEmail),
                 new Claim(ClaimTypes.Name, "Test Admin"),
                 new Claim(AuthEndpoints.AdminClaim, "true"),
-            ], Scheme);
+            ], SchemeName);
 
-            return Task.FromResult(AuthenticateResult.Success(new AuthenticationTicket(new ClaimsPrincipal(identity), Scheme)));
+            return Task.FromResult(AuthenticateResult.Success(new AuthenticationTicket(new ClaimsPrincipal(identity), SchemeName)));
         }
     }
 }

@@ -126,3 +126,9 @@ startupLogger.LogInformation(
 app.Run();
 
 public partial class Program;
+
+namespace HobioAdmin.Web
+{
+    /// <summary>Marker type for WebApplicationFactory in tests.</summary>
+    public sealed class WebAppMarker;
+}
