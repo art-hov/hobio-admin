@@ -38,7 +38,16 @@ ASPNETCORE_ENVIRONMENT="${ASPNETCORE_ENVIRONMENT:-Production}"
 : "${RDS_SECURITY_GROUP_ID:?RDS_SECURITY_GROUP_ID is required}"
 
 export AWS_DEFAULT_REGION="$AWS_REGION"
-SUBNETS="$(echo "$SUBNETS" | tr -d ' ')"
+
+# Strip stray spaces/newlines pasted into the workflow inputs (a trailing space breaks ARNs).
+trim() { echo -n "$1" | tr -d '[:space:]'; }
+ENV_NAME="$(trim "$ENV_NAME")"
+VPC_ID="$(trim "$VPC_ID")"
+SUBNETS="$(trim "$SUBNETS")"
+RDS_SECURITY_GROUP_ID="$(trim "$RDS_SECURITY_GROUP_ID")"
+CERTIFICATE_ARN="$(trim "$CERTIFICATE_ARN")"
+INSTANCE_TYPE="$(trim "$INSTANCE_TYPE")"
+SECRET_IDS="$(trim "$SECRET_IDS")"
 
 log() { echo "==> $*"; }
 
