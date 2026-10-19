@@ -42,6 +42,26 @@ SUBNETS="$(echo "$SUBNETS" | tr -d ' ')"
 
 log() { echo "==> $*"; }
 
+# AWS CLI waiters give up after ~7 minutes; a new load-balanced environment can take longer.
+wait_ready() {
+  local i status health
+  for i in $(seq 1 120); do
+    read -r status health < <(aws elasticbeanstalk describe-environments --application-name "$APP_NAME" --environment-names "$ENV_NAME" \
+      --query 'Environments[?Status!=`Terminated`] | [0].[Status,Health]' --output text)
+    echo "    status=${status} health=${health} ($((i * 20))s)"
+    if [ "$status" = "Ready" ]; then
+      return 0
+    fi
+    if [ "$status" = "None" ] || [ -z "$status" ]; then
+      echo "Environment disappeared (creation failed). Check Elastic Beanstalk > ${ENV_NAME} > Events." >&2
+      return 1
+    fi
+    sleep 20
+  done
+  echo "Timed out after 40 minutes waiting for ${ENV_NAME}. Check Elastic Beanstalk > Events." >&2
+  return 1
+}
+
 ACCOUNT_ID="$(aws sts get-caller-identity --query Account --output text)"
 log "Account ${ACCOUNT_ID}, region ${AWS_REGION}, application ${APP_NAME}, environment ${ENV_NAME}"
 
@@ -226,17 +246,18 @@ if [ "$STATUS" = "None" ] || [ -z "$STATUS" ]; then
     --solution-stack-name "$STACK" \
     --option-settings "$SETTINGS" \
     --tags Key=app,Value=hobio-admin >/dev/null
-  aws elasticbeanstalk wait environment-exists --application-name "$APP_NAME" --environment-names "$ENV_NAME"
+  wait_ready
 else
   log "Environment ${ENV_NAME} exists (status ${STATUS}); applying settings"
-  aws elasticbeanstalk wait environment-updated --application-name "$APP_NAME" --environment-names "$ENV_NAME" || true
+  wait_ready
   # EnvironmentType can't change in place; drop it on updates.
   UPDATE_SETTINGS="$(echo "$SETTINGS" | jq '[.[] | select(.OptionName != "EnvironmentType")]')"
   aws elasticbeanstalk update-environment \
     --application-name "$APP_NAME" \
     --environment-name "$ENV_NAME" \
     --option-settings "$UPDATE_SETTINGS" >/dev/null
-  aws elasticbeanstalk wait environment-updated --application-name "$APP_NAME" --environment-names "$ENV_NAME"
+  sleep 20
+  wait_ready
 fi
 
 aws elasticbeanstalk describe-environments --application-name "$APP_NAME" --environment-names "$ENV_NAME" \

@@ -190,9 +190,15 @@ jobs:
             --application-name "$APP" \
             --environment-name "$ENVNAME" \
             --version-label "$LABEL"
-          aws elasticbeanstalk wait environment-updated \
-            --application-name "$APP" \
-            --environment-names "$ENVNAME"
+          # Wait up to 30 minutes (the CLI waiter gives up after ~7).
+          for i in $(seq 1 90); do
+            STATUS=$(aws elasticbeanstalk describe-environments --application-name "$APP" --environment-names "$ENVNAME" \
+              --query 'Environments[0].Status' --output text)
+            echo "status=${STATUS} ($((i * 20))s)"
+            [ "$STATUS" = "Ready" ] && break
+            sleep 20
+          done
+          [ "$STATUS" = "Ready" ] || { echo "::error::Environment did not become Ready"; exit 1; }
           aws elasticbeanstalk describe-environments \
             --application-name "$APP" --environment-names "$ENVNAME" \
             --query 'Environments[0].[Status,Health,CNAME,VersionLabel]' --output table
