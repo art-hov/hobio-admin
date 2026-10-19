@@ -40,7 +40,9 @@ ASPNETCORE_ENVIRONMENT="${ASPNETCORE_ENVIRONMENT:-Production}"
 export AWS_DEFAULT_REGION="$AWS_REGION"
 
 # Strip stray spaces/newlines pasted into the workflow inputs (a trailing space breaks ARNs).
-trim() { echo -n "$1" | tr -d '[:space:]'; }
+# Keep only characters valid in AWS ids/ARNs/lists. This also drops invisible characters such as
+# non-breaking or zero-width spaces that come along when copying from the AWS console.
+trim() { printf '%s' "$1" | LC_ALL=C sed 's/[^A-Za-z0-9:\/._,@+=-]//g'; }
 ENV_NAME="$(trim "$ENV_NAME")"
 VPC_ID="$(trim "$VPC_ID")"
 SUBNETS="$(trim "$SUBNETS")"
@@ -179,6 +181,21 @@ if [ "$STACK" = "None" ] || [ -z "$STACK" ]; then
   exit 1
 fi
 log "Platform: ${STACK}"
+
+# ---------------------------------------------------------------- certificate check
+if [ -n "$CERTIFICATE_ARN" ]; then
+  CERT_INFO="$(aws acm describe-certificate --certificate-arn "$CERTIFICATE_ARN" \
+    --query 'Certificate.[Status,KeyAlgorithm,DomainName]' --output text)" || {
+    echo "Certificate not found: '${CERTIFICATE_ARN}'. Copy the ARN again from Certificate Manager (ca-central-1)." >&2
+    exit 1
+  }
+  read -r CERT_STATUS CERT_KEY CERT_DOMAIN <<<"$CERT_INFO"
+  log "Certificate ${CERT_DOMAIN}: ${CERT_STATUS}, ${CERT_KEY}"
+  if [ "$CERT_STATUS" != "ISSUED" ]; then
+    echo "Certificate is ${CERT_STATUS}; it must be ISSUED before the load balancer can use it." >&2
+    exit 1
+  fi
+fi
 
 # ---------------------------------------------------------------- option settings
 if [ -n "$CERTIFICATE_ARN" ]; then
