@@ -55,6 +55,19 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v5
 
+      - name: Show identity sent to AWS (diagnostic, no secrets)
+        env:
+          ROLE: ${{ secrets.AWS_ROLE_ARN }}
+        run: |
+          # Which role/account the secret points to (ARNs are not secret).
+          ACCOUNT=$(echo "$ROLE" | cut -d: -f5)
+          ROLE_NAME=$(echo "$ROLE" | cut -d/ -f2-)
+          echo "::notice title=Role being assumed::account=${ACCOUNT:-<empty>} role=${ROLE_NAME:-<empty>} length=${#ROLE}"
+          # Claims inside GitHub's OIDC token (the token itself is never printed).
+          TOKEN=$(curl -sS -H "Authorization: bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" "$ACTIONS_ID_TOKEN_REQUEST_URL&audience=sts.amazonaws.com" | jq -r .value)
+          CLAIMS=$(python3 -c 'import sys,base64,json; p=sys.argv[1].split(".")[1]; p+="="*(-len(p)%4); c=json.loads(base64.urlsafe_b64decode(p)); print(json.dumps({k:c.get(k) for k in ["sub","aud","iss","repository","repository_owner","environment","ref"]}))' "$TOKEN")
+          echo "::notice title=OIDC claims::${CLAIMS}"
+
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
