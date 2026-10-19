@@ -3,6 +3,7 @@ using HobioAdmin.Web.Analytics;
 using HobioAdmin.Web.Auth;
 using HobioAdmin.Web.Components;
 using HobioAdmin.Web.Configuration;
+using HobioAdmin.Web.Hosting;
 using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.Extensions.Options;
@@ -82,6 +83,12 @@ builder.Services.Configure<ForwardedHeadersOptions>(options =>
 var app = builder.Build();
 var authOptions = app.Services.GetRequiredService<IOptions<AuthOptions>>().Value;
 
+if (!app.Environment.IsDevelopment() && authOptions.RequireHttps)
+{
+    // Must run before UseForwardedHeaders, which consumes X-Forwarded-Proto.
+    app.UseLoadBalancerHttpsRedirect();
+}
+
 app.UseForwardedHeaders();
 
 if (!app.Environment.IsDevelopment())
@@ -90,7 +97,6 @@ if (!app.Environment.IsDevelopment())
     if (authOptions.RequireHttps)
     {
         app.UseHsts();
-        app.UseHttpsRedirection();
     }
 }
 
