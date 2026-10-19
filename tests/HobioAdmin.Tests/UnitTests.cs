@@ -278,3 +278,21 @@ public class SqlScriptTests
         Assert.Throws<InvalidOperationException>(() =>
             SqlScripts.Substitute("SELECT '$(Missing)'", new Dictionary<string, string>()));
 }
+
+public class HttpsRedirectTests
+{
+    [Theory]
+    [InlineData("http", "admin.hobio.ca", "/", "", "https://admin.hobio.ca/")]
+    [InlineData("http", "admin.hobio.ca:80", "/retention", "?p=6m", "https://admin.hobio.ca/retention?p=6m")]
+    [InlineData("HTTP, http", "admin.hobio.ca", "/login", "", "https://admin.hobio.ca/login")]
+    public void Redirects_plain_http_from_the_load_balancer(string proto, string host, string path, string query, string expected) =>
+        Assert.Equal(expected, HobioAdmin.Web.Hosting.HttpsRedirect.GetRedirectUrl(proto, host, "", path, query));
+
+    [Theory]
+    [InlineData("https", "admin.hobio.ca")]   // already secure
+    [InlineData("", "10.0.1.5")]              // load balancer health check: no forwarded header
+    [InlineData(null, "admin.hobio.ca")]
+    [InlineData("http", "")]
+    public void Leaves_other_requests_alone(string? proto, string host) =>
+        Assert.Null(HobioAdmin.Web.Hosting.HttpsRedirect.GetRedirectUrl(proto, host, "", "/healthz", ""));
+}
