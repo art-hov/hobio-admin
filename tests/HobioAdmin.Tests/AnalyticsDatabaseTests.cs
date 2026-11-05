@@ -295,6 +295,90 @@ public sealed class AnalyticsDatabaseTests(SqlServerFixture db)
     }
 
     [Fact]
+    public async Task User_signups_list_names_newest_first_and_count_the_whole_range()
+    {
+        if (!db.Available) return;
+
+        var page = await Repo().GetUserSignupsAsync(October, offset: 0, pageSize: 50);
+
+        Assert.Equal(3, page.Total);        // P2, P3, P4 (same as the overview's "new users")
+        Assert.Equal(1, page.DeletedCount); // P3
+        Assert.Equal(new string?[] { "P Four", null, "P Two" }, page.Rows.Select(r => r.FullName).ToArray());
+        Assert.True(page.Rows[1].IsDeleted);
+        Assert.Equal(new DateTime(2026, 10, 20, 12, 0, 0), page.Rows[0].CreatedAtUtc);
+    }
+
+    [Fact]
+    public async Task User_signups_page_in_sql_and_keep_totals()
+    {
+        if (!db.Available) return;
+
+        var second = await Repo().GetUserSignupsAsync(October, offset: 2, pageSize: 2);
+
+        Assert.Equal(3, second.Total);
+        Assert.Equal("P Two", Assert.Single(second.Rows).FullName);
+    }
+
+    [Fact]
+    public async Task User_signups_use_toronto_day_boundaries()
+    {
+        if (!db.Available) return;
+
+        // P2 joined 2026-10-02 12:00 UTC = 08:00 Toronto, so a one-day range of Oct 2 contains exactly P2.
+        var oct2 = UserSignupRange.Resolve(new DateOnly(2026, 10, 2), new DateOnly(2026, 10, 2), new DateTime(2026, 10, 31, 15, 0, 0, DateTimeKind.Utc));
+        var page = await Repo().GetUserSignupsAsync(oct2, 0, 50);
+
+        Assert.Equal(1, page.Total);
+        Assert.Equal("P Two", page.Rows.Single().FullName);
+
+        var empty = await Repo().GetUserSignupsAsync(ReportPeriods.Create(new DateOnly(2020, 1, 1), new DateOnly(2020, 2, 1), BucketSize.Day), 0, 50);
+        Assert.Equal(0, empty.Total);
+        Assert.Equal(0, empty.DeletedCount);
+        Assert.Empty(empty.Rows);
+    }
+
+    [Fact]
+    public async Task User_directory_exposes_no_contact_details()
+    {
+        if (!db.Available) return;
+
+        await using var connection = new SqlConnection(db.ReaderConnectionString);
+        await connection.OpenAsync();
+        await using var cmd = new SqlCommand(
+            "SELECT name FROM sys.columns WHERE object_id = OBJECT_ID('analytics.vw_UserDirectory') ORDER BY column_id", connection);
+        var columns = new List<string>();
+        await using (var reader = await cmd.ExecuteReaderAsync())
+        {
+            while (await reader.ReadAsync())
+            {
+                columns.Add(reader.GetString(0));
+            }
+        }
+
+        Assert.Equal(new[] { "UserId", "FullName", "CreatedAtUtc", "CreatedDateLocal", "IsDeleted" }, columns);
+    }
+
+    [Fact]
+    public async Task Service_defaults_users_to_last_seven_days()
+    {
+        if (!db.Available) return;
+
+        // Oct 24 Toronto: last 7 days = Oct 18..24, which contains P4 (Oct 20) only.
+        var service = new AnalyticsService(Repo(), new FixedClock(new DateTime(2026, 10, 24, 15, 0, 0, DateTimeKind.Utc)));
+        var users = await service.GetUsersAsync(null, null, page: 1);
+
+        Assert.Equal(new DateOnly(2026, 10, 18), users.Range.From);
+        Assert.Equal(new DateOnly(2026, 10, 25), users.Range.To);
+        Assert.Equal(1, users.Signups.Total);
+        Assert.Equal("P Four", users.Signups.Rows.Single().FullName);
+
+        var week = await service.GetOverviewAsync(ReportPeriod.OneWeek, null);
+        Assert.Equal(users.Range.From, week.Range.From);
+        Assert.Equal(1, week.Current.NewUsers);
+        Assert.Equal(7, week.Users.Buckets.Count);
+    }
+
+    [Fact]
     public async Task Reader_cannot_read_or_change_base_tables()
     {
         if (!db.Available) return;

@@ -12,6 +12,8 @@ public class ReportPeriodTests
     private static readonly TimeZoneInfo Toronto = TimeZoneInfo.FindSystemTimeZoneById("America/Toronto");
 
     [Theory]
+    [InlineData("1w", ReportPeriod.OneWeek)]
+    [InlineData("7d", ReportPeriod.OneWeek)]
     [InlineData("1m", ReportPeriod.OneMonth)]
     [InlineData("2m", ReportPeriod.TwoMonths)]
     [InlineData("3m", ReportPeriod.ThreeMonths)]
@@ -34,6 +36,45 @@ public class ReportPeriodTests
         Assert.Equal(new DateTime(2026, 10, 18, 4, 0, 0, DateTimeKind.Utc), range.ToUtc);
         Assert.Equal(new DateTime(2026, 9, 18, 4, 0, 0, DateTimeKind.Utc), range.FromUtc);
         Assert.Equal(BucketSize.Day, range.Bucket);
+    }
+
+    [Fact]
+    public void One_week_is_the_last_seven_toronto_days_including_today()
+    {
+        // 2026-11-06 03:00 UTC is still Thursday 2026-11-05 22:00 in Toronto (EST, UTC-5).
+        var range = ReportPeriods.Resolve(ReportPeriod.OneWeek, new DateTime(2026, 11, 6, 3, 0, 0, DateTimeKind.Utc), Toronto);
+
+        Assert.Equal(new DateOnly(2026, 10, 30), range.From);
+        Assert.Equal(new DateOnly(2026, 11, 6), range.To);
+        Assert.Equal(7, range.To.DayNumber - range.From.DayNumber);
+        Assert.Equal(BucketSize.Day, range.Bucket);
+        Assert.Equal(7, ReportPeriods.Buckets(range).Count);
+        // Spans the Nov 1 DST change: Oct 30 midnight is EDT (UTC-4), Nov 6 midnight is EST (UTC-5).
+        Assert.Equal(new DateTime(2026, 10, 30, 4, 0, 0, DateTimeKind.Utc), range.FromUtc);
+        Assert.Equal(new DateTime(2026, 11, 6, 5, 0, 0, DateTimeKind.Utc), range.ToUtc);
+    }
+
+    [Fact]
+    public void One_week_has_key_label_and_comes_first_in_the_picker()
+    {
+        Assert.Equal("1w", ReportPeriods.Key(ReportPeriod.OneWeek));
+        Assert.Equal("1 week", ReportPeriods.Label(ReportPeriod.OneWeek));
+        Assert.Equal(ReportPeriod.OneWeek, ReportPeriods.All[0]);
+        Assert.Equal(ReportPeriod.OneWeek, ReportPeriods.Parse(ReportPeriods.Key(ReportPeriod.OneWeek)));
+        // Existing keys and labels are unchanged.
+        Assert.Equal("1m", ReportPeriods.Key(ReportPeriod.OneMonth));
+        Assert.Equal("1 month", ReportPeriods.Label(ReportPeriod.OneMonth));
+        Assert.Equal("1y", ReportPeriods.Key(ReportPeriod.OneYear));
+    }
+
+    [Fact]
+    public void Previous_week_is_the_seven_days_before()
+    {
+        var range = ReportPeriods.Resolve(ReportPeriod.OneWeek, new DateTime(2026, 10, 31, 15, 0, 0, DateTimeKind.Utc), Toronto);
+        var previous = ReportPeriods.Previous(range, Toronto);
+
+        Assert.Equal(new DateOnly(2026, 10, 18), previous.From);
+        Assert.Equal(range.From, previous.To);
     }
 
     [Fact]
@@ -277,4 +318,91 @@ public class SqlScriptTests
     public void Unresolved_variable_throws() =>
         Assert.Throws<InvalidOperationException>(() =>
             SqlScripts.Substitute("SELECT '$(Missing)'", new Dictionary<string, string>()));
+}
+
+public class UserSignupRangeTests
+{
+    private static readonly TimeZoneInfo Toronto = TimeZoneInfo.FindSystemTimeZoneById("America/Toronto");
+
+    // Thursday 2026-11-05 22:00 in Toronto.
+    private static readonly DateTime Now = new(2026, 11, 6, 3, 0, 0, DateTimeKind.Utc);
+
+    [Fact]
+    public void Defaults_to_the_last_seven_days_including_today()
+    {
+        var range = UserSignupRange.Resolve(null, null, Now, Toronto);
+
+        Assert.Equal(new DateOnly(2026, 10, 30), range.From);
+        Assert.Equal(new DateOnly(2026, 11, 6), range.To); // exclusive: Nov 5 is the last day shown
+        Assert.Equal(7, range.To.DayNumber - range.From.DayNumber);
+    }
+
+    [Fact]
+    public void To_date_is_inclusive_and_converted_with_toronto_midnights()
+    {
+        var range = UserSignupRange.Resolve(new DateOnly(2026, 10, 1), new DateOnly(2026, 10, 31), Now, Toronto);
+
+        Assert.Equal(new DateOnly(2026, 10, 1), range.From);
+        Assert.Equal(new DateOnly(2026, 11, 1), range.To);
+        Assert.Equal(new DateTime(2026, 10, 1, 4, 0, 0, DateTimeKind.Utc), range.FromUtc);
+        Assert.Equal(new DateTime(2026, 11, 1, 4, 0, 0, DateTimeKind.Utc), range.ToUtc);
+    }
+
+    [Fact]
+    public void Single_day_range_is_allowed()
+    {
+        var day = new DateOnly(2026, 10, 20);
+        var range = UserSignupRange.Resolve(day, day, Now, Toronto);
+
+        Assert.Equal(day, range.From);
+        Assert.Equal(day.AddDays(1), range.To);
+    }
+
+    [Fact]
+    public void Reversed_range_is_swapped()
+    {
+        var range = UserSignupRange.Resolve(new DateOnly(2026, 10, 31), new DateOnly(2026, 10, 1), Now, Toronto);
+
+        Assert.Equal(new DateOnly(2026, 10, 1), range.From);
+        Assert.Equal(new DateOnly(2026, 11, 1), range.To);
+    }
+
+    [Fact]
+    public void Only_from_given_runs_to_today()
+    {
+        var range = UserSignupRange.Resolve(new DateOnly(2026, 10, 1), null, Now, Toronto);
+
+        Assert.Equal(new DateOnly(2026, 10, 1), range.From);
+        Assert.Equal(new DateOnly(2026, 11, 6), range.To);
+    }
+
+    [Fact]
+    public void Only_to_given_shows_the_seven_days_ending_then()
+    {
+        var range = UserSignupRange.Resolve(null, new DateOnly(2026, 10, 10), Now, Toronto);
+
+        Assert.Equal(new DateOnly(2026, 10, 4), range.From);
+        Assert.Equal(new DateOnly(2026, 10, 11), range.To);
+    }
+
+    [Theory]
+    [InlineData(7, "2026-10-30")]
+    [InlineData(30, "2026-10-07")]
+    public void Last_days_quick_ranges_end_today(int days, string expectedFrom)
+    {
+        var (from, to) = UserSignupRange.LastDays(days, Now, Toronto);
+
+        Assert.Equal(DateOnly.Parse(expectedFrom), from);
+        Assert.Equal(new DateOnly(2026, 11, 5), to);
+    }
+
+    [Fact]
+    public void Page_count_rounds_up_and_is_at_least_one()
+    {
+        var range = UserSignupRange.Resolve(null, null, Now, Toronto);
+
+        Assert.Equal(1, new UsersData(range, 1, 50, new UserSignupPage(0, 0, [])).PageCount);
+        Assert.Equal(1, new UsersData(range, 1, 50, new UserSignupPage(50, 0, [])).PageCount);
+        Assert.Equal(2, new UsersData(range, 1, 50, new UserSignupPage(51, 0, [])).PageCount);
+    }
 }

@@ -66,6 +66,7 @@ public sealed class PortalPageTests(SqlServerFixture db)
 
     [Theory]
     [InlineData("/cities")]
+    [InlineData("/users")]
     [InlineData("/retention")]
     [InlineData("/investor-report")]
     [InlineData("/_blazor/negotiate?negotiateVersion=1")]
@@ -199,6 +200,54 @@ public sealed class PortalPageTests(SqlServerFixture db)
         Assert.Contains("Top cities", html);
         Assert.Contains("Retention by sign-up month", html);
         Assert.Contains("Print / Save as PDF", html);
+    }
+
+    [Fact]
+    public async Task Overview_one_week_period()
+    {
+        if (!db.Available) return;
+        using var factory = CreateFactory(signedIn: true);
+        using var client = Client(factory);
+
+        var html = await GetOk(client, "/?period=1w");
+
+        Assert.Contains("1 week", html);
+        Assert.Contains("Oct 25, 2026", html); // Clock is Oct 31: last 7 days = Oct 25..31
+    }
+
+    [Fact]
+    public async Task Users_page_lists_names_and_join_dates_for_a_range()
+    {
+        if (!db.Available) return;
+        using var factory = CreateFactory(signedIn: true);
+        using var client = Client(factory);
+
+        var html = await GetOk(client, "/users?from=2026-10-01&to=2026-10-31");
+
+        Assert.Contains("Users joined", html);
+        Assert.Contains("Oct 1, 2026", html);
+        Assert.Contains("Oct 31, 2026", html);
+        Assert.Contains("P Four", html);
+        Assert.Contains("P Two", html);
+        Assert.Contains("Oct 20, 2026", html);
+        Assert.Contains("8:00 AM", html);                // P4 joined 12:00 UTC = 08:00 Toronto (EDT)
+        Assert.Contains("Deleted account", html);
+        Assert.DoesNotContain("P Three", html);         // deleted users' names are not shown
+        Assert.Contains("1 deleted since joining", html);
+    }
+
+    [Fact]
+    public async Task Users_page_defaults_to_last_seven_days()
+    {
+        if (!db.Available) return;
+        using var factory = CreateFactory(signedIn: true);
+        using var client = Client(factory);
+
+        var html = await GetOk(client, "/users");
+
+        Assert.Contains("Oct 25, 2026", html);
+        Assert.Contains("Oct 31, 2026", html);
+        Assert.Contains("No users joined in this period.", html);
     }
 
     [Fact]
