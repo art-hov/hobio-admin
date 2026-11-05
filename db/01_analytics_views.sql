@@ -5,6 +5,8 @@
     Safe to re-run: every object uses CREATE OR ALTER.
 
     The views expose aggregate-friendly columns only: no names, emails, phone numbers or payment IDs.
+    The one exception is vw_UserDirectory, which adds each user's full name for the portal's Users page
+    (still no emails, phone numbers, dates of birth or payment IDs; deleted accounts show no name).
     The portal's read-only login can read these views and nothing else (see 02_readonly_user.sql).
 
     Assumptions (check against Tushpa if numbers look off):
@@ -58,6 +60,21 @@ SELECT
     CAST((u.[CreatedAt] AT TIME ZONE 'UTC') AT TIME ZONE 'Eastern Standard Time' AS date) AS CreatedDateLocal,
     u.[IsDeleted]                                                               AS IsDeleted,
     CAST(CASE WHEN u.[ReferredByUserId] IS NOT NULL THEN 1 ELSE 0 END AS bit)   AS WasReferred
+FROM [dbo].[Users] AS u;
+GO
+
+/* Sign-up list for the Users page: name and join time only. Deleted accounts keep their row (so counts match
+   vw_Users) but their name is withheld. */
+CREATE OR ALTER VIEW [analytics].[vw_UserDirectory]
+AS
+SELECT
+    u.[Id]                                                                      AS UserId,
+    CASE WHEN u.[IsDeleted] = 1 THEN NULL
+         ELSE NULLIF(LTRIM(RTRIM(CONCAT(LTRIM(RTRIM(u.[FirstName])), N' ', LTRIM(RTRIM(u.[LastName]))))), N'')
+    END                                                                         AS FullName,
+    u.[CreatedAt]                                                               AS CreatedAtUtc,
+    CAST((u.[CreatedAt] AT TIME ZONE 'UTC') AT TIME ZONE 'Eastern Standard Time' AS date) AS CreatedDateLocal,
+    u.[IsDeleted]                                                               AS IsDeleted
 FROM [dbo].[Users] AS u;
 GO
 

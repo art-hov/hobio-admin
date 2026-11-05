@@ -96,6 +96,26 @@ html, body {
     min-width: 180px;
 }
 
+.date-select {
+    width: 150px;
+    flex: 0 0 auto;
+}
+
+/* ---------- Users page ---------- */
+.user-deleted {
+    color: var(--hobio-muted);
+    font-style: italic;
+}
+
+.users-pager {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    margin-top: 16px;
+}
+
 .section-label {
     display: block;
     color: var(--hobio-muted);
