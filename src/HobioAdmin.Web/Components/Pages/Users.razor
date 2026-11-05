@@ -1,0 +1,197 @@
+@page "/users"
+@inject IAnalyticsService Analytics
+@inject NavigationManager Navigation
+@inject ILogger<Users> Logger
+
+<PageTitle>Users · Hobio Admin</PageTitle>
+
+<div class="page-head">
+    <div>
+        <MudText Typo="Typo.h4" Class="page-title">Users</MudText>
+        @if (_data is not null)
+        {
+            <MudText Typo="Typo.body2" Class="page-sub">Joined @Fmt.RangeText(_data.Range) · Toronto time</MudText>
+        }
+    </div>
+    <div class="page-filters">
+        <MudButtonGroup Variant="Variant.Outlined" Color="Color.Primary" Size="Size.Small" OverrideStyles="false" aria-label="Quick ranges">
+            @foreach (var days in QuickRanges)
+            {
+                var d = days;
+                <MudButton Variant="@(IsQuickRange(d) ? Variant.Filled : Variant.Outlined)"
+                           Color="Color.Primary"
+                           DropShadow="false"
+                           OnClick="@(() => SelectLastDays(d))">
+                    @QuickLabel(d)
+                </MudButton>
+            }
+        </MudButtonGroup>
+        <MudDatePicker Label="From" Date="@ToDateTime(_from)" DateChanged="OnFromChanged" DateFormat="yyyy-MM-dd"
+                       Variant="Variant.Outlined" Margin="Margin.Dense" Editable="true" Class="date-select" />
+        <MudDatePicker Label="To" Date="@ToDateTime(_to)" DateChanged="OnToChanged" DateFormat="yyyy-MM-dd"
+                       Variant="Variant.Outlined" Margin="Margin.Dense" Editable="true" Class="date-select" />
+    </div>
+</div>
+
+@if (!Analytics.IsConfigured)
+{
+    <NotConfigured />
+}
+else if (_error is not null)
+{
+    <LoadError Message="@_error" />
+}
+else if (_data is null)
+{
+    <MudProgressLinear Color="Color.Primary" Indeterminate="true" Class="mb-4" />
+}
+else
+{
+    var s = _data.Signups;
+
+    <div class="kpi-grid">
+        <KpiCard Label="Users joined" Value="@Fmt.Number(s.Total)" Hint="@DaysHint" />
+        <KpiCard Label="Still active" Value="@Fmt.Number(s.Total - s.DeletedCount)" Hint="@DeletedHint" />
+    </div>
+
+    <MudPaper Class="pa-4" Elevation="0" Outlined="true">
+        <MudText Typo="Typo.subtitle1" Class="chart-title mb-3">New users, newest first</MudText>
+        <MudTable Items="s.Rows" Dense="true" Hover="true" Elevation="0" Breakpoint="Breakpoint.Sm" HorizontalScrollbar="true">
+            <HeaderContent>
+                <MudTh>Full name</MudTh>
+                <MudTh>Join date</MudTh>
+            </HeaderContent>
+            <RowTemplate>
+                <MudTd DataLabel="Full name">
+                    @if (context.FullName is null)
+                    {
+                        <span class="user-deleted">@(context.IsDeleted ? "Deleted account" : "(no name)")</span>
+                    }
+                    else
+                    {
+                        @context.FullName
+                    }
+                </MudTd>
+                <MudTd DataLabel="Join date">@JoinText(context.CreatedAtUtc)</MudTd>
+            </RowTemplate>
+            <NoRecordsContent>
+                <div class="chart-empty">No users joined in this period.</div>
+            </NoRecordsContent>
+        </MudTable>
+
+        @if (_data.PageCount > 1)
+        {
+            <div class="users-pager">
+                <MudText Typo="Typo.caption">
+                    @Fmt.Number((_data.Page - 1) * _data.PageSize + 1)–@Fmt.Number(Math.Min(_data.Page * _data.PageSize, s.Total)) of @Fmt.Number(s.Total)
+                </MudText>
+                <MudPagination Count="_data.PageCount" Selected="_data.Page" SelectedChanged="OnPageChanged" Size="Size.Small" Color="Color.Primary" />
+            </div>
+        }
+    </MudPaper>
+}
+
+@code {
+    private static readonly int[] QuickRanges = [7, 30, 90, 365];
+
+    [SupplyParameterFromQuery(Name = "from")]
+    private string? FromQuery { get; set; }
+
+    [SupplyParameterFromQuery(Name = "to")]
+    private string? ToQuery { get; set; }
+
+    [SupplyParameterFromQuery(Name = "page")]
+    private int? PageQuery { get; set; }
+
+    private DateOnly _from;
+    private DateOnly _to;
+    private UsersData? _data;
+    private string? _error;
+
+    private int DaysInRange => _data is null ? 0 : _data.Range.To.DayNumber - _data.Range.From.DayNumber;
+
+    private string DaysHint => DaysInRange == 1 ? "1 day" : $"{Fmt.Number(DaysInRange)} days";
+
+    private string DeletedHint => _data is null || _data.Signups.DeletedCount == 0
+        ? "No deleted accounts"
+        : $"{Fmt.Number(_data.Signups.DeletedCount)} deleted since joining";
+
+    protected override async Task OnParametersSetAsync()
+    {
+        var range = UserSignupRange.Resolve(ParseDate(FromQuery), ParseDate(ToQuery), Analytics.UtcNow);
+        _from = range.From;
+        _to = range.To.AddDays(-1);
+
+        if (!Analytics.IsConfigured)
+        {
+            return;
+        }
+
+        _error = null;
+        _data = null;
+        try
+        {
+            _data = await Analytics.GetUsersAsync(_from, _to, PageQuery ?? 1);
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Failed to load users.");
+            _error = ex.Message;
+        }
+    }
+
+    private static DateOnly? ParseDate(string? value) =>
+        DateOnly.TryParseExact(value, "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out var d) ? d : null;
+
+    private static DateTime? ToDateTime(DateOnly value) => value.ToDateTime(TimeOnly.MinValue);
+
+    private static string QuickLabel(int days) => days switch
+    {
+        365 => "1 year",
+        _ => $"{days} days",
+    };
+
+    private bool IsQuickRange(int days)
+    {
+        var (from, to) = UserSignupRange.LastDays(days, Analytics.UtcNow);
+        return _from == from && _to == to;
+    }
+
+    private void SelectLastDays(int days)
+    {
+        var (from, to) = UserSignupRange.LastDays(days, Analytics.UtcNow);
+        Navigate(from, to, null);
+    }
+
+    private void OnFromChanged(DateTime? value)
+    {
+        if (value is not null)
+        {
+            Navigate(DateOnly.FromDateTime(value.Value), _to, null);
+        }
+    }
+
+    private void OnToChanged(DateTime? value)
+    {
+        if (value is not null)
+        {
+            Navigate(_from, DateOnly.FromDateTime(value.Value), null);
+        }
+    }
+
+    private void OnPageChanged(int page) => Navigate(_from, _to, page);
+
+    private void Navigate(DateOnly from, DateOnly to, int? page) =>
+        Navigation.NavigateTo(Navigation.GetUriWithQueryParameters(new Dictionary<string, object?>
+        {
+            ["from"] = from.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture),
+            ["to"] = to.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture),
+            ["page"] = page is > 1 ? page : null,
+        }));
+
+    private static string JoinText(DateTime createdAtUtc)
+    {
+        var local = TimeZoneInfo.ConvertTimeFromUtc(DateTime.SpecifyKind(createdAtUtc, DateTimeKind.Utc), ReportPeriods.HomeTimeZone);
+        return $"{Fmt.Date(DateOnly.FromDateTime(local))} · {local.ToString("h:mm tt", CultureInfo.InvariantCulture)}";
+    }
+}

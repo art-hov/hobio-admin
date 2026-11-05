@@ -107,3 +107,15 @@ public sealed class CityOption
     public int CityId { get; set; }
     public string CityName { get; set; } = string.Empty;
 }
+
+/// <summary>One user who signed up, for the Users page. FullName is null for deleted accounts.</summary>
+public sealed class UserSignup
+{
+    public Guid UserId { get; set; }
+    public string? FullName { get; set; }
+    public DateTime CreatedAtUtc { get; set; }
+    public bool IsDeleted { get; set; }
+}
+
+/// <summary>One page of sign-ups plus the totals for the whole date range.</summary>
+public sealed record UserSignupPage(int Total, int DeletedCount, IReadOnlyList<UserSignup> Rows);

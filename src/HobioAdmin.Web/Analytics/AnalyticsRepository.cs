@@ -18,6 +18,7 @@ public interface IAnalyticsRepository
     Task<IReadOnlyList<MonthlyActive>> GetMonthlyActiveAsync(DateRange range, CancellationToken ct = default);
     Task<IReadOnlyList<CohortRow>> GetCohortsAsync(DateRange range, CancellationToken ct = default);
     Task<IReadOnlyList<CityOption>> GetCitiesAsync(CancellationToken ct = default);
+    Task<UserSignupPage> GetUserSignupsAsync(DateRange range, int offset, int pageSize, CancellationToken ct = default);
 }
 
 /// <summary>
@@ -284,6 +285,30 @@ public sealed class AnalyticsRepository(string? connectionString) : IAnalyticsRe
         var rows = await connection.QueryAsync<CityOption>(new CommandDefinition(sql,
             commandTimeout: CommandTimeoutSeconds, cancellationToken: ct));
         return rows.AsList();
+    }
+
+    public async Task<UserSignupPage> GetUserSignupsAsync(DateRange range, int offset, int pageSize, CancellationToken ct = default)
+    {
+        // Counts cover the whole range; the list is one page, newest first. Filtering and paging happen in SQL.
+        const string sql = """
+            SELECT COUNT(*) AS Total, COALESCE(SUM(CASE WHEN IsDeleted = 1 THEN 1 ELSE 0 END), 0) AS DeletedCount
+            FROM analytics.vw_UserDirectory
+            WHERE CreatedAtUtc >= @FromUtc AND CreatedAtUtc < @ToUtc;
+
+            SELECT UserId, FullName, CreatedAtUtc, IsDeleted
+            FROM analytics.vw_UserDirectory
+            WHERE CreatedAtUtc >= @FromUtc AND CreatedAtUtc < @ToUtc
+            ORDER BY CreatedAtUtc DESC, UserId
+            OFFSET @Offset ROWS FETCH NEXT @PageSize ROWS ONLY;
+            """;
+
+        await using var connection = Open();
+        using var results = await connection.QueryMultipleAsync(new CommandDefinition(sql,
+            new { range.FromUtc, range.ToUtc, Offset = Math.Max(0, offset), PageSize = Math.Max(1, pageSize) },
+            commandTimeout: CommandTimeoutSeconds, cancellationToken: ct));
+        var totals = await results.ReadSingleAsync<(int Total, int DeletedCount)>();
+        var rows = (await results.ReadAsync<UserSignup>()).AsList();
+        return new UserSignupPage(totals.Total, totals.DeletedCount, rows);
     }
 
     private async Task<IReadOnlyList<T>> QueryAsync<T>(string sql, DateRange range, int? cityId, CancellationToken ct)

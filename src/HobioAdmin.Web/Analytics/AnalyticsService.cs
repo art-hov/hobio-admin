@@ -47,6 +47,44 @@ public sealed record InvestorReportData(
     IReadOnlyList<CohortRow> Cohorts,
     DateTime GeneratedAtUtc);
 
+public sealed record UsersData(DateRange Range, int Page, int PageSize, UserSignupPage Signups)
+{
+    public int PageCount => Math.Max(1, (int)Math.Ceiling(Signups.Total / (double)PageSize));
+}
+
+/// <summary>Date-range rules for the Users page. Dates are Toronto local days; From and To are both inclusive.</summary>
+public static class UserSignupRange
+{
+    public const int DefaultDays = 7;
+    public const int PageSize = 50;
+
+    /// <summary>
+    /// Missing dates default to the last 7 days including today. A reversed range is swapped.
+    /// Returns a <see cref="DateRange"/> whose To is exclusive (the day after the inclusive end).
+    /// </summary>
+    public static DateRange Resolve(DateOnly? from, DateOnly? to, DateTime utcNow, TimeZoneInfo? timeZone = null)
+    {
+        var tz = timeZone ?? ReportPeriods.HomeTimeZone;
+        var today = DateOnly.FromDateTime(TimeZoneInfo.ConvertTimeFromUtc(DateTime.SpecifyKind(utcNow, DateTimeKind.Utc), tz));
+        var end = to ?? today;
+        var start = from ?? end.AddDays(-(DefaultDays - 1));
+        if (start > end)
+        {
+            (start, end) = (end, start);
+        }
+
+        return ReportPeriods.Create(start, end.AddDays(1), BucketSize.Day, tz);
+    }
+
+    /// <summary>The last <paramref name="days"/> days including today, as inclusive (from, to) dates.</summary>
+    public static (DateOnly From, DateOnly To) LastDays(int days, DateTime utcNow, TimeZoneInfo? timeZone = null)
+    {
+        var range = Resolve(null, null, utcNow, timeZone);
+        var today = range.To.AddDays(-1);
+        return (today.AddDays(-(days - 1)), today);
+    }
+}
+
 public interface IAnalyticsService
 {
     bool IsConfigured { get; }
@@ -55,6 +93,8 @@ public interface IAnalyticsService
     Task<IReadOnlyList<CohortRow>> GetCohortsAsync(CancellationToken ct = default);
     Task<InvestorReportData> GetInvestorReportAsync(ReportPeriod period, CancellationToken ct = default);
     Task<IReadOnlyList<CityOption>> GetCityOptionsAsync(CancellationToken ct = default);
+    Task<UsersData> GetUsersAsync(DateOnly? from, DateOnly? to, int page, CancellationToken ct = default);
+    DateTime UtcNow { get; }
 }
 
 public sealed class AnalyticsService(IAnalyticsRepository repository, TimeProvider clock) : IAnalyticsService
@@ -165,6 +205,17 @@ public sealed class AnalyticsService(IAnalyticsRepository repository, TimeProvid
     }
 
     public Task<IReadOnlyList<CityOption>> GetCityOptionsAsync(CancellationToken ct = default) => repository.GetCitiesAsync(ct);
+
+    public DateTime UtcNow => clock.GetUtcNow().UtcDateTime;
+
+    public async Task<UsersData> GetUsersAsync(DateOnly? from, DateOnly? to, int page, CancellationToken ct = default)
+    {
+        var range = UserSignupRange.Resolve(from, to, UtcNow);
+        var pageNumber = Math.Max(1, page);
+        var size = UserSignupRange.PageSize;
+        var signups = await repository.GetUserSignupsAsync(range, (pageNumber - 1) * size, size, ct);
+        return new UsersData(range, pageNumber, size, signups);
+    }
 
     internal static IReadOnlyList<string> Labels(IReadOnlyList<DateOnly> buckets, BucketSize bucket)
     {
