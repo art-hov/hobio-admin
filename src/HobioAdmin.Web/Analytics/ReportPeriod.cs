@@ -2,6 +2,8 @@ namespace HobioAdmin.Web.Analytics;
 
 public enum ReportPeriod
 {
+    // The other values are month counts; OneWeek is the exception and is handled explicitly below.
+    OneWeek = -1,
     OneMonth = 1,
     TwoMonths = 2,
     ThreeMonths = 3,
@@ -26,18 +28,20 @@ public sealed record DateRange(DateOnly From, DateOnly To, DateTime FromUtc, Dat
 public static class ReportPeriods
 {
     public static readonly ReportPeriod[] All =
-        [ReportPeriod.OneMonth, ReportPeriod.TwoMonths, ReportPeriod.ThreeMonths, ReportPeriod.SixMonths, ReportPeriod.OneYear];
+        [ReportPeriod.OneWeek, ReportPeriod.OneMonth, ReportPeriod.TwoMonths, ReportPeriod.ThreeMonths, ReportPeriod.SixMonths, ReportPeriod.OneYear];
 
     public static TimeZoneInfo HomeTimeZone { get; } = TimeZoneInfo.FindSystemTimeZoneById("America/Toronto");
 
     public static string Key(ReportPeriod period) => period switch
     {
+        ReportPeriod.OneWeek => "1w",
         ReportPeriod.OneYear => "1y",
         _ => $"{(int)period}m",
     };
 
     public static string Label(ReportPeriod period) => period switch
     {
+        ReportPeriod.OneWeek => "1 week",
         ReportPeriod.OneMonth => "1 month",
         ReportPeriod.OneYear => "1 year",
         _ => $"{(int)period} months",
@@ -45,6 +49,7 @@ public static class ReportPeriods
 
     public static ReportPeriod Parse(string? key) => key?.Trim().ToLowerInvariant() switch
     {
+        "1w" or "7d" => ReportPeriod.OneWeek,
         "1m" => ReportPeriod.OneMonth,
         "2m" => ReportPeriod.TwoMonths,
         "3m" => ReportPeriod.ThreeMonths,
@@ -55,7 +60,7 @@ public static class ReportPeriods
 
     public static BucketSize BucketFor(ReportPeriod period) => period switch
     {
-        ReportPeriod.OneMonth => BucketSize.Day,
+        ReportPeriod.OneWeek or ReportPeriod.OneMonth => BucketSize.Day,
         ReportPeriod.TwoMonths or ReportPeriod.ThreeMonths => BucketSize.Week,
         _ => BucketSize.Month,
     };
@@ -65,7 +70,8 @@ public static class ReportPeriods
         var tz = timeZone ?? HomeTimeZone;
         var localToday = DateOnly.FromDateTime(TimeZoneInfo.ConvertTimeFromUtc(DateTime.SpecifyKind(utcNow, DateTimeKind.Utc), tz));
         var to = localToday.AddDays(1);
-        var from = to.AddMonths(-(int)period);
+        // One week = the last 7 local days including today.
+        var from = period == ReportPeriod.OneWeek ? to.AddDays(-7) : to.AddMonths(-(int)period);
         return Create(from, to, BucketFor(period), tz);
     }
 
