@@ -123,6 +123,10 @@ public sealed class SqlServerFixture : IAsyncLifetime
             (@P3, N'P',    N'Three', '1990-01-01', '2026-10-03T12:00:00', N'P3', 1, NULL),
             (@P4, N'P',    N'Four',  '1990-01-01', '2026-10-20T12:00:00', N'P4', 0, @P1);
 
+        UPDATE dbo.Users SET Email = 'p1@example.com' WHERE Id = @P1;
+        UPDATE dbo.Users SET Email = 'p2@example.com' WHERE Id = @P2;
+        UPDATE dbo.Users SET Email = 'p3@example.com' WHERE Id = @P3; -- deleted: never exposed
+
         INSERT INTO dbo.Countries (Name, Code) VALUES (N'Canada', N'CA');
         INSERT INTO dbo.Cities (Name, CountryId, TimeZoneId, CityCode) VALUES (N'Ottawa', 1, 'America/Toronto', 1), (N'Gatineau', 1, 'America/Toronto', 2);
         INSERT INTO dbo.Sports (Id, Name, Slug) VALUES (1, N'Soccer', N'soccer');
@@ -448,6 +452,47 @@ public sealed class AnalyticsDatabaseTests(SqlServerFixture db)
         Assert.Null(crash.ReportedFullName);
         Assert.False(crash.ReportedIsDeleted);
         Assert.Equal("The app closed when I opened my bookings.", crash.Description);
+
+        Assert.Equal("p1@example.com", rude.ReporterEmail);
+        Assert.Equal("p2@example.com", noShow.ReporterEmail);
+    }
+
+    [Fact]
+    public async Task Single_report_lookup_returns_reporter_email()
+    {
+        if (!db.Available) return;
+
+        var all = await Repo().GetIssueReportsAsync(0, 50);
+        var id = all.Rows.Single(r => r.Title == "No-show").ReportId;
+
+        var report = await Repo().GetIssueReportAsync(id);
+
+        Assert.NotNull(report);
+        Assert.Equal("p2@example.com", report.ReporterEmail);
+        Assert.Equal("P Two", report.ReporterFullName);
+        Assert.Null(await Repo().GetIssueReportAsync(999_999));
+    }
+
+    [Fact]
+    public async Task Reports_view_exposes_only_the_reporters_email()
+    {
+        if (!db.Available) return;
+
+        await using var connection = new SqlConnection(db.ReaderConnectionString);
+        await connection.OpenAsync();
+        await using var cmd = new SqlCommand(
+            "SELECT name FROM sys.columns WHERE object_id = OBJECT_ID('analytics.vw_Reports') AND name LIKE '%Email%' ORDER BY name", connection);
+        var columns = new List<string>();
+        await using (var reader = await cmd.ExecuteReaderAsync())
+        {
+            while (await reader.ReadAsync())
+            {
+                columns.Add(reader.GetString(0));
+            }
+        }
+
+        // EmailSent is a yes/no flag; ReporterEmail is the only address.
+        Assert.Equal(new[] { "EmailSent", "ReporterEmail" }, columns);
     }
 
     [Fact]

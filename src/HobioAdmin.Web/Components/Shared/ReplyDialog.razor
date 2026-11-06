@@ -1,0 +1,71 @@
+@* Reply to the person who sent a report. The recipient is resolved again on the server by report id when sending. *@
+@inject ReportReplyService Replies
+@inject AuthenticationStateProvider AuthState
+
+<MudDialog>
+    <TitleContent>
+        <MudText Typo="Typo.h6">Reply to report</MudText>
+    </TitleContent>
+    <DialogContent>
+        <MudText Typo="Typo.body2" Class="mb-1"><strong>To:</strong> @Report.ReporterFullName &lt;@Report.ReporterEmail&gt;</MudText>
+        <MudText Typo="Typo.caption" Class="kpi-vs d-block mb-3">A copy goes to your support inbox (BCC).</MudText>
+
+        <MudTextField @bind-Value="_subject" Label="Subject" Variant="Variant.Outlined" Margin="Margin.Dense"
+                      MaxLength="ReportReplyService.MaxSubjectLength" Class="mb-3" />
+        <MudTextField @bind-Value="_message" Label="Message" Variant="Variant.Outlined" Lines="8"
+                      MaxLength="ReportReplyService.MaxMessageLength" Immediate="true"
+                      Placeholder="Write your reply. The original report is quoted below it automatically." />
+
+        <div class="report-text mt-3 report-quote">
+            <div class="report-title">@Report.Title</div>
+            <div>@Report.Description</div>
+        </div>
+
+        @if (_error is not null)
+        {
+            <MudAlert Severity="Severity.Error" Dense="true" Class="mt-3">@_error</MudAlert>
+        }
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="Cancel" Disabled="_sending">Cancel</MudButton>
+        <MudButton Color="Color.Primary" Variant="Variant.Filled" OnClick="Send"
+                   Disabled="@(_sending || string.IsNullOrWhiteSpace(_message))"
+                   StartIcon="@Icons.Material.Filled.Send">
+            @(_sending ? "Sending…" : "Send reply")
+        </MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private IMudDialogInstance MudDialog { get; set; } = default!;
+
+    [Parameter, EditorRequired] public IssueReport Report { get; set; } = default!;
+
+    private string _subject = string.Empty;
+    private string _message = string.Empty;
+    private string? _error;
+    private bool _sending;
+
+    protected override void OnInitialized() => _subject = ReportReplyService.DefaultSubject(Report.Title);
+
+    private void Cancel() => MudDialog.Cancel();
+
+    private async Task Send()
+    {
+        _sending = true;
+        _error = null;
+        var state = await AuthState.GetAuthenticationStateAsync();
+        var admin = state.User.FindFirst(ClaimTypes.Email)?.Value;
+
+        var result = await Replies.SendAsync(Report.ReportId, _subject, _message, admin);
+        _sending = false;
+        if (result.Sent)
+        {
+            MudDialog.Close(DialogResult.Ok(result.Message));
+        }
+        else
+        {
+            _error = result.Message;
+        }
+    }
+}

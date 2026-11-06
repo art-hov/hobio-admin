@@ -20,6 +20,7 @@ public interface IAnalyticsRepository
     Task<IReadOnlyList<CityOption>> GetCitiesAsync(CancellationToken ct = default);
     Task<UserSignupPage> GetUserSignupsAsync(DateRange range, int offset, int pageSize, CancellationToken ct = default);
     Task<IssueReportPage> GetIssueReportsAsync(int offset, int pageSize, CancellationToken ct = default);
+    Task<IssueReport?> GetIssueReportAsync(long reportId, CancellationToken ct = default);
 }
 
 /// <summary>
@@ -320,7 +321,7 @@ public sealed class AnalyticsRepository(string? connectionString) : IAnalyticsRe
             SELECT COUNT(*) FROM analytics.vw_Reports;
 
             SELECT ReportId, CreatedAtUtc, Title, Description,
-                   ReporterUserId, ReporterFullName, ReporterIsDeleted,
+                   ReporterUserId, ReporterFullName, ReporterIsDeleted, ReporterEmail,
                    ReportedUserId, ReportedFullName, ReportedIsDeleted,
                    EmailSent
             FROM analytics.vw_Reports
@@ -342,6 +343,29 @@ public sealed class AnalyticsRepository(string? connectionString) : IAnalyticsRe
         var total = await results.ReadSingleAsync<int>();
         var rows = (await results.ReadAsync<IssueReport>()).AsList();
         return new IssueReportPage(true, total, rows);
+    }
+
+    public async Task<IssueReport?> GetIssueReportAsync(long reportId, CancellationToken ct = default)
+    {
+        const string existsSql = "SELECT CASE WHEN OBJECT_ID(N'analytics.vw_Reports', N'V') IS NULL THEN 0 ELSE 1 END;";
+        const string sql = """
+            SELECT ReportId, CreatedAtUtc, Title, Description,
+                   ReporterUserId, ReporterFullName, ReporterIsDeleted, ReporterEmail,
+                   ReportedUserId, ReportedFullName, ReportedIsDeleted, EmailSent
+            FROM analytics.vw_Reports
+            WHERE ReportId = @ReportId;
+            """;
+
+        await using var connection = Open();
+        var exists = await connection.ExecuteScalarAsync<int>(new CommandDefinition(existsSql,
+            commandTimeout: CommandTimeoutSeconds, cancellationToken: ct));
+        if (exists == 0)
+        {
+            return null;
+        }
+
+        return await connection.QuerySingleOrDefaultAsync<IssueReport>(new CommandDefinition(sql, new { ReportId = reportId },
+            commandTimeout: CommandTimeoutSeconds, cancellationToken: ct));
     }
 
     private async Task<IReadOnlyList<T>> QueryAsync<T>(string sql, DateRange range, int? cityId, CancellationToken ct)

@@ -130,6 +130,7 @@ public sealed class IssueReport
     public Guid ReporterUserId { get; set; }
     public string? ReporterFullName { get; set; }
     public bool ReporterIsDeleted { get; set; }
+    public string? ReporterEmail { get; set; }
     public Guid? ReportedUserId { get; set; }
     public string? ReportedFullName { get; set; }
     public bool ReportedIsDeleted { get; set; }

@@ -18,6 +18,7 @@ namespace HobioAdmin.Web.Configuration;
 ///
 /// A JSON secret is flattened: each top-level property becomes a key, with "__" mapped to ":"
 /// (e.g. "HobioAdmin__ReadOnlyConnectionString" -> "HobioAdmin:ReadOnlyConnectionString").
+/// Nested objects are also flattened ("EmailCredentials": { "Host": "x" } -> "EmailCredentials:Host").
 /// A plain-text secret is exposed under its secret name.
 /// </summary>
 public static class AwsSecretsConfiguration
@@ -98,19 +99,32 @@ public static class AwsSecretsConfiguration
             }
 
             var result = new List<KeyValuePair<string, string?>>();
-            foreach (var property in document.RootElement.EnumerateObject())
-            {
-                var key = property.Name.Replace("__", ":", StringComparison.Ordinal);
-                var value = property.Value.ValueKind switch
-                {
-                    JsonValueKind.String => property.Value.GetString(),
-                    JsonValueKind.Null => null,
-                    _ => property.Value.GetRawText(),
-                };
-                result.Add(new(key, value));
-            }
-
+            AddProperties(document.RootElement, prefix: null, result);
             return result;
+        }
+    }
+
+    // Each property becomes a key. A nested object keeps its raw JSON under its own key (existing behavior,
+    // e.g. a Firebase service-account object) and also exposes its children as "Parent:Child" keys, so a block
+    // like "EmailCredentials": { "Host": ... } binds to the EmailCredentials configuration section.
+    private static void AddProperties(JsonElement element, string? prefix, List<KeyValuePair<string, string?>> result)
+    {
+        foreach (var property in element.EnumerateObject())
+        {
+            var name = property.Name.Replace("__", ":", StringComparison.Ordinal);
+            var key = prefix is null ? name : $"{prefix}:{name}";
+            var value = property.Value.ValueKind switch
+            {
+                JsonValueKind.String => property.Value.GetString(),
+                JsonValueKind.Null => null,
+                _ => property.Value.GetRawText(),
+            };
+            result.Add(new(key, value));
+
+            if (property.Value.ValueKind == JsonValueKind.Object)
+            {
+                AddProperties(property.Value, key, result);
+            }
         }
     }
 

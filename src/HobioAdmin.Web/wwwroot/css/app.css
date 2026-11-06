@@ -117,6 +117,19 @@ html, body {
     color: var(--hobio-muted);
 }
 
+.report-email {
+    color: var(--hobio-muted);
+    font-size: 0.8125rem;
+    overflow-wrap: anywhere;
+}
+
+.report-quote {
+    border-left: 3px solid var(--hobio-border);
+    padding-left: 12px;
+    color: var(--hobio-muted);
+    max-width: none;
+}
+
 /* ---------- Users page ---------- */
 .user-deleted {
     color: var(--hobio-muted);

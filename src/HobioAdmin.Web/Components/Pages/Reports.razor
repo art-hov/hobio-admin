@@ -2,6 +2,9 @@
 @inject IAnalyticsService Analytics
 @inject NavigationManager Navigation
 @inject ILogger<Reports> Logger
+@inject IDialogService Dialogs
+@inject ISnackbar Snackbar
+@inject ReportReplyService Replies
 
 <PageTitle>Reported issues · Hobio Admin</PageTitle>
 
@@ -39,6 +42,14 @@ else
         <KpiCard Label="Total reports" Value="@Fmt.Number(r.Total)" Hint="All time" />
     </div>
 
+    @if (!Replies.IsConfigured)
+    {
+        <MudAlert Severity="Severity.Info" Variant="Variant.Outlined" Dense="true" Class="mb-4">
+            Replying is off until email is set up: add an EmailCredentials block (Host, Port, Email, Password)
+            to the hobio-admin AWS secret and restart the environment.
+        </MudAlert>
+    }
+
     <MudPaper Class="pa-4" Elevation="0" Outlined="true">
         <MudTable Items="r.Rows" Dense="true" Hover="true" Elevation="0" Breakpoint="Breakpoint.Sm" HorizontalScrollbar="true">
             <HeaderContent>
@@ -47,6 +58,7 @@ else
                 <MudTh>Reported by</MudTh>
                 <MudTh>Reported user</MudTh>
                 <MudTh>Email to support</MudTh>
+                <MudTh></MudTh>
             </HeaderContent>
             <RowTemplate>
                 <MudTd DataLabel="Date" Style="white-space:nowrap">@DateText(context.CreatedAtUtc)</MudTd>
@@ -56,7 +68,13 @@ else
                         <div>@context.Description</div>
                     </div>
                 </MudTd>
-                <MudTd DataLabel="Reported by">@NameOrPlaceholder(context.ReporterFullName, context.ReporterIsDeleted)</MudTd>
+                <MudTd DataLabel="Reported by">
+                    @NameOrPlaceholder(context.ReporterFullName, context.ReporterIsDeleted)
+                    @if (!string.IsNullOrWhiteSpace(context.ReporterEmail))
+                    {
+                        <div class="report-email">@context.ReporterEmail</div>
+                    }
+                </MudTd>
                 <MudTd DataLabel="Reported user">
                     @if (context.ReportedUserId is null)
                     {
@@ -68,6 +86,14 @@ else
                     }
                 </MudTd>
                 <MudTd DataLabel="Email to support">@(context.EmailSent ? "Sent" : "Not sent")</MudTd>
+                <MudTd>
+                    @if (CanReply(context))
+                    {
+                        var report = context;
+                        <MudButton Variant="Variant.Outlined" Color="Color.Primary" Size="Size.Small" Class="reply-button"
+                                   StartIcon="@Icons.Material.Filled.Reply" OnClick="@(() => OpenReply(report))">Reply</MudButton>
+                    }
+                </MudTd>
             </RowTemplate>
             <NoRecordsContent>
                 <div class="chart-empty">No reports yet.</div>
@@ -110,6 +136,21 @@ else
         {
             Logger.LogError(ex, "Failed to load reports.");
             _error = ex.Message;
+        }
+    }
+
+    private bool CanReply(IssueReport report) =>
+        Replies.IsConfigured && !report.ReporterIsDeleted && ReportReplyService.IsValidAddress(report.ReporterEmail);
+
+    private async Task OpenReply(IssueReport report)
+    {
+        var parameters = new DialogParameters<ReplyDialog> { { d => d.Report, report } };
+        var options = new DialogOptions { MaxWidth = MaxWidth.Small, FullWidth = true, CloseOnEscapeKey = true };
+        var dialog = await Dialogs.ShowAsync<ReplyDialog>("Reply to report", parameters, options);
+        var result = await dialog.Result;
+        if (result is { Canceled: false, Data: string message })
+        {
+            Snackbar.Add(message, Severity.Success);
         }
     }
 

@@ -3,6 +3,9 @@ using HobioAdmin.Web.Analytics;
 using HobioAdmin.Web.Auth;
 using HobioAdmin.Web.Components.Shared;
 using HobioAdmin.Web.Configuration;
+using HobioAdmin.Web.Email;
+using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 
 namespace HobioAdmin.Tests;
@@ -255,6 +258,35 @@ public class ConfigurationTests
     }
 
     [Fact]
+    public void Nested_email_credentials_bind_to_email_options()
+    {
+        var pairs = AwsSecretsConfiguration.Flatten("hobio-admin/prod", """
+            { "EmailCredentials": { "Host": "smtp.example.com", "Port": 587, "Email": "support@hobio.ca", "Password": "pw" },
+              "FirebaseAdminSdk": { "project_id": "p" } }
+            """).ToList();
+
+        var config = new ConfigurationBuilder().AddInMemoryCollection(pairs).Build();
+        var options = config.GetSection(EmailOptions.SectionName).Get<EmailOptions>()!;
+
+        Assert.Equal("smtp.example.com", options.Host);
+        Assert.Equal(587, options.Port);
+        Assert.Equal("support@hobio.ca", options.Email);
+        Assert.Equal("pw", options.Password);
+        Assert.True(options.IsConfigured);
+
+        // A nested object still keeps its raw JSON under its own key, as before.
+        Assert.Equal("{ \"project_id\": \"p\" }", pairs.Single(p => p.Key == "FirebaseAdminSdk").Value);
+    }
+
+    [Fact]
+    public void Email_options_need_host_email_and_password()
+    {
+        Assert.False(new EmailOptions().IsConfigured);
+        Assert.False(new EmailOptions { Host = "h", Email = "e@x.ca" }.IsConfigured);
+        Assert.True(new EmailOptions { Host = "h", Email = "e@x.ca", Password = "p" }.IsConfigured);
+    }
+
+    [Fact]
     public void Plain_text_secret_uses_its_name()
     {
         var pairs = AwsSecretsConfiguration.Flatten("ConnectionString", "Server=y").ToList();
@@ -404,5 +436,161 @@ public class UserSignupRangeTests
         Assert.Equal(1, new UsersData(range, 1, 50, new UserSignupPage(0, 0, [])).PageCount);
         Assert.Equal(1, new UsersData(range, 1, 50, new UserSignupPage(50, 0, [])).PageCount);
         Assert.Equal(2, new UsersData(range, 1, 50, new UserSignupPage(51, 0, [])).PageCount);
+    }
+}
+
+public class ReportReplyServiceTests
+{
+    private static IssueReport Report(string? email = "p1@example.com", bool deleted = false) => new()
+    {
+        ReportId = 7,
+        CreatedAtUtc = new DateTime(2026, 10, 5, 12, 0, 0),
+        Title = "App crash",
+        Description = "The app closed when I opened my bookings.",
+        ReporterFullName = deleted ? null : "Pat One",
+        ReporterIsDeleted = deleted,
+        ReporterEmail = email,
+    };
+
+    private static (ReportReplyService Service, FakeSender Sender) Create(IssueReport? report, bool configured = true, Exception? failWith = null)
+    {
+        var sender = new FakeSender(configured, failWith);
+        return (new ReportReplyService(new FakeRepository(report), sender, NullLogger<ReportReplyService>.Instance), sender);
+    }
+
+    [Fact]
+    public async Task Sends_to_the_reporter_email_from_the_database_with_bcc_to_the_sender()
+    {
+        var (service, sender) = Create(Report());
+
+        var result = await service.SendAsync(7, null, "  Thanks, we fixed it.  ", "admin@hobio.ca");
+
+        Assert.True(result.Sent);
+        var email = Assert.Single(sender.Sent);
+        Assert.Equal("p1@example.com", email.To);
+        Assert.Equal("support@hobio.ca", email.Bcc);
+        Assert.Equal("Re: App crash", email.Subject);
+        Assert.StartsWith("Hi Pat,", email.Body);
+        Assert.Contains("Thanks, we fixed it.", email.Body);
+        Assert.Contains("The app closed when I opened my bookings.", email.Body); // original report quoted
+        Assert.Contains("Oct 5, 2026 8:00 AM", email.Body);                     // Toronto time
+    }
+
+    [Fact]
+    public async Task Subject_cannot_contain_line_breaks()
+    {
+        var (service, sender) = Create(Report());
+
+        await service.SendAsync(7, "Hello\r\nBcc: attacker@example.com", "Hi", "admin@hobio.ca");
+
+        Assert.Equal("Hello Bcc: attacker@example.com", sender.Sent.Single().Subject);
+    }
+
+    [Fact]
+    public async Task Refuses_when_email_is_not_configured()
+    {
+        var (service, sender) = Create(Report(), configured: false);
+
+        var result = await service.SendAsync(7, null, "Hi", "admin@hobio.ca");
+
+        Assert.False(result.Sent);
+        Assert.Contains("isn't set up", result.Message);
+        Assert.Empty(sender.Sent);
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData("   ")]
+    public async Task Refuses_an_empty_message(string message)
+    {
+        var (service, sender) = Create(Report());
+
+        Assert.False((await service.SendAsync(7, null, message, "admin@hobio.ca")).Sent);
+        Assert.Empty(sender.Sent);
+    }
+
+    [Fact]
+    public async Task Refuses_an_overlong_message()
+    {
+        var (service, sender) = Create(Report());
+
+        var result = await service.SendAsync(7, null, new string('x', ReportReplyService.MaxMessageLength + 1), "admin@hobio.ca");
+
+        Assert.False(result.Sent);
+        Assert.Empty(sender.Sent);
+    }
+
+    [Theory]
+    [InlineData(null, false)]
+    [InlineData("not-an-email", false)]
+    [InlineData("p1@example.com", true)] // deleted reporter
+    public async Task Refuses_when_there_is_no_one_to_reply_to(string? email, bool deleted)
+    {
+        var (service, sender) = Create(Report(email, deleted));
+
+        var result = await service.SendAsync(7, null, "Hi", "admin@hobio.ca");
+
+        Assert.False(result.Sent);
+        Assert.Empty(sender.Sent);
+    }
+
+    [Fact]
+    public async Task Refuses_a_missing_report()
+    {
+        var (service, sender) = Create(null);
+
+        Assert.False((await service.SendAsync(99, null, "Hi", "admin@hobio.ca")).Sent);
+        Assert.Empty(sender.Sent);
+    }
+
+    [Fact]
+    public async Task Smtp_failure_is_reported_not_thrown()
+    {
+        var (service, _) = Create(Report(), failWith: new System.Net.Mail.SmtpException("Authentication failed"));
+
+        var result = await service.SendAsync(7, null, "Hi", "admin@hobio.ca");
+
+        Assert.False(result.Sent);
+        Assert.Contains("Authentication failed", result.Message);
+    }
+
+    private sealed class FakeSender(bool configured, Exception? failWith) : IEmailSender
+    {
+        public List<OutgoingEmail> Sent { get; } = [];
+        public bool IsConfigured => configured;
+        public string? FromAddress => "support@hobio.ca";
+
+        public Task SendAsync(OutgoingEmail email, CancellationToken ct = default)
+        {
+            if (failWith is not null)
+            {
+                throw failWith;
+            }
+
+            Sent.Add(email);
+            return Task.CompletedTask;
+        }
+    }
+
+    private sealed class FakeRepository(IssueReport? report) : IAnalyticsRepository
+    {
+        public bool IsConfigured => true;
+        public Task<IssueReport?> GetIssueReportAsync(long reportId, CancellationToken ct = default) =>
+            Task.FromResult(report is not null && report.ReportId == reportId ? report : null);
+
+        public Task<KpiSnapshot> GetKpisAsync(DateRange range, int? cityId, CancellationToken ct = default) => throw new NotSupportedException();
+        public Task<IReadOnlyList<DailyValue>> GetNewUsersDailyAsync(DateRange range, CancellationToken ct = default) => throw new NotSupportedException();
+        public Task<int> GetUsersBeforeAsync(DateTime utc, CancellationToken ct = default) => throw new NotSupportedException();
+        public Task<IReadOnlyList<DailyValue>> GetEventsHeldDailyAsync(DateRange range, int? cityId, CancellationToken ct = default) => throw new NotSupportedException();
+        public Task<IReadOnlyList<DailyValue>> GetBookingsDailyAsync(DateRange range, int? cityId, CancellationToken ct = default) => throw new NotSupportedException();
+        public Task<IReadOnlyList<DailySumCount>> GetPaidPriceDailyAsync(DateRange range, int? cityId, CancellationToken ct = default) => throw new NotSupportedException();
+        public Task<IReadOnlyList<DailyRevenue>> GetRevenueDailyAsync(DateRange range, int? cityId, CancellationToken ct = default) => throw new NotSupportedException();
+        public Task<IReadOnlyList<WeekdayCityCount>> GetWeekdayByCityAsync(DateRange range, CancellationToken ct = default) => throw new NotSupportedException();
+        public Task<IReadOnlyList<CitySummary>> GetCitySummaryAsync(DateRange range, CancellationToken ct = default) => throw new NotSupportedException();
+        public Task<IReadOnlyList<MonthlyActive>> GetMonthlyActiveAsync(DateRange range, CancellationToken ct = default) => throw new NotSupportedException();
+        public Task<IReadOnlyList<CohortRow>> GetCohortsAsync(DateRange range, CancellationToken ct = default) => throw new NotSupportedException();
+        public Task<IReadOnlyList<CityOption>> GetCitiesAsync(CancellationToken ct = default) => throw new NotSupportedException();
+        public Task<UserSignupPage> GetUserSignupsAsync(DateRange range, int offset, int pageSize, CancellationToken ct = default) => throw new NotSupportedException();
+        public Task<IssueReportPage> GetIssueReportsAsync(int offset, int pageSize, CancellationToken ct = default) => throw new NotSupportedException();
     }
 }

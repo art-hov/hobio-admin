@@ -22,9 +22,17 @@ public sealed class PortalPageTests(SqlServerFixture db)
 {
     private const string AdminEmail = "admin@hobio.ca";
 
-    private WebApplicationFactory<HobioAdmin.Web.WebAppMarker> CreateFactory(bool signedIn) =>
+    private WebApplicationFactory<HobioAdmin.Web.WebAppMarker> CreateFactory(bool signedIn, bool emailConfigured = false) =>
         new WebApplicationFactory<HobioAdmin.Web.WebAppMarker>().WithWebHostBuilder(builder =>
         {
+            if (emailConfigured)
+            {
+                builder.UseSetting("EmailCredentials:Host", "smtp.example.invalid");
+                builder.UseSetting("EmailCredentials:Port", "587");
+                builder.UseSetting("EmailCredentials:Email", "support@hobio.ca");
+                builder.UseSetting("EmailCredentials:Password", "not-a-real-password");
+            }
+
             builder.UseEnvironment("Testing");
             builder.UseSetting("Admin:AllowedEmails", AdminEmail);
             builder.UseSetting("Auth:RequireHttps", "false");
@@ -270,6 +278,24 @@ public sealed class PortalPageTests(SqlServerFixture db)
         Assert.DoesNotContain("P Three", html);
         Assert.Contains("Not sent", html);
         Assert.Contains("Oct 22, 2026", html);
+        Assert.Contains("p1@example.com", html);       // reporter's email
+        Assert.DoesNotContain("p3@example.com", html); // the reported (deleted) user's email is never shown
+        Assert.Contains("Replying is off", html);      // no EmailCredentials in this test
+        Assert.DoesNotContain("reply-button", html);
+    }
+
+    [Fact]
+    public async Task Reports_page_offers_reply_when_email_is_configured()
+    {
+        if (!db.Available) return;
+        using var factory = CreateFactory(signedIn: true, emailConfigured: true);
+        using var client = Client(factory);
+
+        var html = await GetOk(client, "/reports");
+
+        Assert.DoesNotContain("Replying is off", html);
+        Assert.Contains("reply-button", html);
+        Assert.Contains("p2@example.com", html);
     }
 
     [Fact]

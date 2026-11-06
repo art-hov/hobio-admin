@@ -3,6 +3,7 @@ using HobioAdmin.Web.Analytics;
 using HobioAdmin.Web.Auth;
 using HobioAdmin.Web.Components;
 using HobioAdmin.Web.Configuration;
+using HobioAdmin.Web.Email;
 using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.Extensions.Options;
@@ -32,6 +33,11 @@ builder.Services.AddSingleton<IAnalyticsRepository>(sp =>
     return new AnalyticsRepository(connectionString);
 });
 builder.Services.AddScoped<IAnalyticsService, AnalyticsService>();
+
+// Replies to reported issues. Settings come from the "EmailCredentials" block in the hobio-admin secret.
+builder.Services.Configure<EmailOptions>(builder.Configuration.GetSection(EmailOptions.SectionName));
+builder.Services.AddSingleton<IEmailSender, SmtpEmailSender>();
+builder.Services.AddScoped<ReportReplyService>();
 
 builder.Services
     .AddAuthentication(CookieAuthenticationDefaults.AuthenticationScheme)
