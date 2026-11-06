@@ -23,6 +23,31 @@ public sealed class SqlServerFixture : IAsyncLifetime
 
     public bool Available => ReaderConnectionString is not null;
 
+    public bool ReportsViewCreatedWithoutTable { get; private set; }
+
+    private static async Task<int> ScalarAsync(string connectionString, string sql)
+    {
+        await using var connection = new SqlConnection(connectionString);
+        await connection.OpenAsync();
+        await using var cmd = new SqlCommand(sql, connection);
+        return (int)(await cmd.ExecuteScalarAsync())!;
+    }
+
+    // Same shape as Tushpa's src/TushpaDB/Tables/Reports.sql.
+    private const string ReportsTableSql = """
+        CREATE TABLE [dbo].[Reports] (
+            [Id] BIGINT PRIMARY KEY IDENTITY,
+            [ReporterUserId] UNIQUEIDENTIFIER NOT NULL,
+            [ReportedUserId] UNIQUEIDENTIFIER NULL,
+            [Title] NVARCHAR(200) NOT NULL,
+            [Description] NVARCHAR(4000) NOT NULL,
+            [CreatedAt] DATETIME2 NOT NULL DEFAULT GETUTCDATE(),
+            [EmailSentAt] DATETIME2 NULL,
+            CONSTRAINT FK_Reports_ReporterUser FOREIGN KEY (ReporterUserId) REFERENCES [dbo].[Users](Id),
+            CONSTRAINT FK_Reports_ReportedUser FOREIGN KEY (ReportedUserId) REFERENCES [dbo].[Users](Id)
+        );
+        """;
+
     public async Task InitializeAsync()
     {
         _serverConnectionString = Environment.GetEnvironmentVariable("HOBIO_TEST_SQL");
@@ -43,8 +68,13 @@ public sealed class SqlServerFixture : IAsyncLifetime
         AdminConnectionString = new SqlConnectionStringBuilder(server.ConnectionString) { InitialCatalog = _databaseName }.ConnectionString;
 
         await SqlScripts.ExecuteBatchesAsync(AdminConnectionString, LoadFixture());
+
+        // Like a database where Tushpa's Reports table isn't deployed yet: the script must still succeed.
         await SqlScripts.ApplyViewsAsync(AdminConnectionString);
-        await SqlScripts.ApplyViewsAsync(AdminConnectionString); // re-runnable
+        ReportsViewCreatedWithoutTable = await ScalarAsync(AdminConnectionString, "SELECT CASE WHEN OBJECT_ID(N'analytics.vw_Reports') IS NULL THEN 0 ELSE 1 END") == 1;
+
+        await SqlScripts.ExecuteBatchesAsync(AdminConnectionString, ReportsTableSql);
+        await SqlScripts.ApplyViewsAsync(AdminConnectionString); // re-runnable, and now creates vw_Reports
         await SqlScripts.CreateReaderAsync(AdminConnectionString, ReaderPassword, ReaderLogin);
         await SqlScripts.CreateReaderAsync(AdminConnectionString, ReaderPassword, ReaderLogin); // re-runnable
         await SqlScripts.ExecuteBatchesAsync(AdminConnectionString, SeedSql);
@@ -122,6 +152,11 @@ public sealed class SqlServerFixture : IAsyncLifetime
         INSERT INTO dbo.Transactions (BookingHoldId, BookingId, EventId, UserId, GrossAmount, HostAmount, HobioFeeAmount, StripeFeeAmount, CreatedAt, RefundStatus) VALUES
             (1, 2, 1, @P1, 21.00, 19.00, 1.00, 1.00, '2026-10-02T13:01:00', 1),
             (2, 3, 1, @P2, 21.00, 19.00, 1.00, 1.00, '2026-10-02T14:01:00', 3); -- refunded: excluded from revenue
+
+        INSERT INTO dbo.Reports (ReporterUserId, ReportedUserId, Title, Description, CreatedAt, EmailSentAt) VALUES
+            (@P1, NULL, N'App crash', N'The app closed when I opened my bookings.', '2026-10-05T12:00:00', '2026-10-05T12:00:05'),
+            (@P2, @P4,  N'No-show', N'Booked and never came.',                       '2026-10-21T12:00:00', NULL),
+            (@P1, @P3,  N'Rude player', N'Was rude during the game.',                  '2026-10-22T12:00:00', '2026-10-22T12:00:03');
 
         INSERT INTO dbo.Payouts (HostUserId, Amount, HobioFeeAmount, Status, CreatedAt) VALUES
             (@H, 100.00, 3.00, 2, '2026-10-10T12:00:00'),
@@ -376,6 +411,54 @@ public sealed class AnalyticsDatabaseTests(SqlServerFixture db)
         Assert.Equal(users.Range.From, week.Range.From);
         Assert.Equal(1, week.Current.NewUsers);
         Assert.Equal(7, week.Users.Buckets.Count);
+    }
+
+    [Fact]
+    public void Views_script_runs_before_the_reports_table_exists()
+    {
+        if (!db.Available) return;
+
+        Assert.False(db.ReportsViewCreatedWithoutTable);
+    }
+
+    [Fact]
+    public async Task Issue_reports_list_newest_first_with_both_names()
+    {
+        if (!db.Available) return;
+
+        var page = await Repo().GetIssueReportsAsync(offset: 0, pageSize: 50);
+
+        Assert.True(page.Available);
+        Assert.Equal(3, page.Total);
+        Assert.Equal(new[] { "Rude player", "No-show", "App crash" }, page.Rows.Select(r => r.Title).ToArray());
+
+        var rude = page.Rows[0];
+        Assert.Equal("P One", rude.ReporterFullName);
+        Assert.Null(rude.ReportedFullName);   // P3 is deleted: name withheld
+        Assert.True(rude.ReportedIsDeleted);
+        Assert.True(rude.EmailSent);
+
+        var noShow = page.Rows[1];
+        Assert.Equal("P Two", noShow.ReporterFullName);
+        Assert.Equal("P Four", noShow.ReportedFullName);
+        Assert.False(noShow.EmailSent);
+
+        var crash = page.Rows[2];
+        Assert.Null(crash.ReportedUserId);    // general issue, no reported user
+        Assert.Null(crash.ReportedFullName);
+        Assert.False(crash.ReportedIsDeleted);
+        Assert.Equal("The app closed when I opened my bookings.", crash.Description);
+    }
+
+    [Fact]
+    public async Task Issue_reports_page_in_sql_and_keep_total()
+    {
+        if (!db.Available) return;
+
+        var page = await Repo().GetIssueReportsAsync(offset: 2, pageSize: 2);
+
+        Assert.Equal(3, page.Total);
+        Assert.Equal("App crash", Assert.Single(page.Rows).Title);
     }
 
     [Fact]

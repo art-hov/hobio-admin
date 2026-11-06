@@ -101,6 +101,22 @@ html, body {
     flex: 0 0 auto;
 }
 
+/* ---------- Reports page ---------- */
+.report-text {
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    min-width: 220px;
+    max-width: 520px;
+}
+
+.report-title {
+    font-weight: 600;
+}
+
+.report-none {
+    color: var(--hobio-muted);
+}
+
 /* ---------- Users page ---------- */
 .user-deleted {
     color: var(--hobio-muted);

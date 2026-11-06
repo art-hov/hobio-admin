@@ -67,6 +67,7 @@ public sealed class PortalPageTests(SqlServerFixture db)
     [Theory]
     [InlineData("/cities")]
     [InlineData("/users")]
+    [InlineData("/reports")]
     [InlineData("/retention")]
     [InlineData("/investor-report")]
     [InlineData("/_blazor/negotiate?negotiateVersion=1")]
@@ -248,6 +249,27 @@ public sealed class PortalPageTests(SqlServerFixture db)
         Assert.Contains("Oct 25, 2026", html);
         Assert.Contains("Oct 31, 2026", html);
         Assert.Contains("No users joined in this period.", html);
+    }
+
+    [Fact]
+    public async Task Reports_page_shows_issues_with_reporter_and_reported_names()
+    {
+        if (!db.Available) return;
+        using var factory = CreateFactory(signedIn: true);
+        using var client = Client(factory);
+
+        var html = await GetOk(client, "/reports");
+
+        Assert.Contains("Reported issues", html);
+        Assert.Contains("Rude player", html);
+        Assert.Contains("Was rude during the game.", html);
+        Assert.Contains("P One", html);                // reporter
+        Assert.Contains("P Four", html);               // reported user
+        Assert.Contains("General issue", html);        // report with no reported user
+        Assert.Contains("Deleted account", html);      // reported user P3 was deleted
+        Assert.DoesNotContain("P Three", html);
+        Assert.Contains("Not sent", html);
+        Assert.Contains("Oct 22, 2026", html);
     }
 
     [Fact]

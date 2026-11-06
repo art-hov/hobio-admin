@@ -119,3 +119,25 @@ public sealed class UserSignup
 
 /// <summary>One page of sign-ups plus the totals for the whole date range.</summary>
 public sealed record UserSignupPage(int Total, int DeletedCount, IReadOnlyList<UserSignup> Rows);
+
+/// <summary>One user-submitted issue report. Names are null for deleted accounts; Reported* is null for general reports.</summary>
+public sealed class IssueReport
+{
+    public long ReportId { get; set; }
+    public DateTime CreatedAtUtc { get; set; }
+    public string Title { get; set; } = string.Empty;
+    public string Description { get; set; } = string.Empty;
+    public Guid ReporterUserId { get; set; }
+    public string? ReporterFullName { get; set; }
+    public bool ReporterIsDeleted { get; set; }
+    public Guid? ReportedUserId { get; set; }
+    public string? ReportedFullName { get; set; }
+    public bool ReportedIsDeleted { get; set; }
+    public bool EmailSent { get; set; }
+}
+
+/// <summary>One page of reports. Available is false when the database has no Reports table yet.</summary>
+public sealed record IssueReportPage(bool Available, int Total, IReadOnlyList<IssueReport> Rows)
+{
+    public static IssueReportPage NotAvailable { get; } = new(false, 0, []);
+}

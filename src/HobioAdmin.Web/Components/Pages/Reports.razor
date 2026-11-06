@@ -1,0 +1,138 @@
+@page "/reports"
+@inject IAnalyticsService Analytics
+@inject NavigationManager Navigation
+@inject ILogger<Reports> Logger
+
+<PageTitle>Reported issues · Hobio Admin</PageTitle>
+
+<div class="page-head">
+    <div>
+        <MudText Typo="Typo.h4" Class="page-title">Reported issues</MudText>
+        <MudText Typo="Typo.body2" Class="page-sub">Reports sent from the app, newest first · Toronto time</MudText>
+    </div>
+</div>
+
+@if (!Analytics.IsConfigured)
+{
+    <NotConfigured />
+}
+else if (_error is not null)
+{
+    <LoadError Message="@_error" />
+}
+else if (_data is null)
+{
+    <MudProgressLinear Color="Color.Primary" Indeterminate="true" Class="mb-4" />
+}
+else if (!_data.Reports.Available)
+{
+    <MudAlert Severity="Severity.Info" Variant="Variant.Outlined">
+        Reports aren't available in this database yet. Deploy the Tushpa database with the Reports table,
+        then re-run db/01_analytics_views.sql.
+    </MudAlert>
+}
+else
+{
+    var r = _data.Reports;
+
+    <div class="kpi-grid">
+        <KpiCard Label="Total reports" Value="@Fmt.Number(r.Total)" Hint="All time" />
+    </div>
+
+    <MudPaper Class="pa-4" Elevation="0" Outlined="true">
+        <MudTable Items="r.Rows" Dense="true" Hover="true" Elevation="0" Breakpoint="Breakpoint.Sm" HorizontalScrollbar="true">
+            <HeaderContent>
+                <MudTh>Date</MudTh>
+                <MudTh>Issue</MudTh>
+                <MudTh>Reported by</MudTh>
+                <MudTh>Reported user</MudTh>
+                <MudTh>Email to support</MudTh>
+            </HeaderContent>
+            <RowTemplate>
+                <MudTd DataLabel="Date" Style="white-space:nowrap">@DateText(context.CreatedAtUtc)</MudTd>
+                <MudTd DataLabel="Issue">
+                    <div class="report-text">
+                        <div class="report-title">@context.Title</div>
+                        <div>@context.Description</div>
+                    </div>
+                </MudTd>
+                <MudTd DataLabel="Reported by">@NameOrPlaceholder(context.ReporterFullName, context.ReporterIsDeleted)</MudTd>
+                <MudTd DataLabel="Reported user">
+                    @if (context.ReportedUserId is null)
+                    {
+                        <span class="report-none">General issue</span>
+                    }
+                    else
+                    {
+                        @NameOrPlaceholder(context.ReportedFullName, context.ReportedIsDeleted)
+                    }
+                </MudTd>
+                <MudTd DataLabel="Email to support">@(context.EmailSent ? "Sent" : "Not sent")</MudTd>
+            </RowTemplate>
+            <NoRecordsContent>
+                <div class="chart-empty">No reports yet.</div>
+            </NoRecordsContent>
+        </MudTable>
+
+        @if (_data.PageCount > 1)
+        {
+            <div class="users-pager">
+                <MudText Typo="Typo.caption">
+                    @Fmt.Number((_data.Page - 1) * _data.PageSize + 1)–@Fmt.Number(Math.Min(_data.Page * _data.PageSize, r.Total)) of @Fmt.Number(r.Total)
+                </MudText>
+                <MudPagination Count="_data.PageCount" Selected="_data.Page" SelectedChanged="OnPageChanged" Size="Size.Small" Color="Color.Primary" />
+            </div>
+        }
+    </MudPaper>
+}
+
+@code {
+    [SupplyParameterFromQuery(Name = "page")]
+    private int? PageQuery { get; set; }
+
+    private ReportsData? _data;
+    private string? _error;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (!Analytics.IsConfigured)
+        {
+            return;
+        }
+
+        _error = null;
+        _data = null;
+        try
+        {
+            _data = await Analytics.GetReportsAsync(PageQuery ?? 1);
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Failed to load reports.");
+            _error = ex.Message;
+        }
+    }
+
+    private void OnPageChanged(int page) =>
+        Navigation.NavigateTo(Navigation.GetUriWithQueryParameter("page", page > 1 ? page : null));
+
+    private static RenderFragment NameOrPlaceholder(string? name, bool isDeleted) => builder =>
+    {
+        if (name is not null)
+        {
+            builder.AddContent(0, name);
+            return;
+        }
+
+        builder.OpenElement(1, "span");
+        builder.AddAttribute(2, "class", "user-deleted");
+        builder.AddContent(3, isDeleted ? "Deleted account" : "Unknown user");
+        builder.CloseElement();
+    };
+
+    private static string DateText(DateTime createdAtUtc)
+    {
+        var local = TimeZoneInfo.ConvertTimeFromUtc(DateTime.SpecifyKind(createdAtUtc, DateTimeKind.Utc), ReportPeriods.HomeTimeZone);
+        return $"{Fmt.Date(DateOnly.FromDateTime(local))} · {local.ToString("h:mm tt", CultureInfo.InvariantCulture)}";
+    }
+}

@@ -19,6 +19,7 @@ public interface IAnalyticsRepository
     Task<IReadOnlyList<CohortRow>> GetCohortsAsync(DateRange range, CancellationToken ct = default);
     Task<IReadOnlyList<CityOption>> GetCitiesAsync(CancellationToken ct = default);
     Task<UserSignupPage> GetUserSignupsAsync(DateRange range, int offset, int pageSize, CancellationToken ct = default);
+    Task<IssueReportPage> GetIssueReportsAsync(int offset, int pageSize, CancellationToken ct = default);
 }
 
 /// <summary>
@@ -309,6 +310,38 @@ public sealed class AnalyticsRepository(string? connectionString) : IAnalyticsRe
         var totals = await results.ReadSingleAsync<(int Total, int DeletedCount)>();
         var rows = (await results.ReadAsync<UserSignup>()).AsList();
         return new UserSignupPage(totals.Total, totals.DeletedCount, rows);
+    }
+
+    public async Task<IssueReportPage> GetIssueReportsAsync(int offset, int pageSize, CancellationToken ct = default)
+    {
+        // vw_Reports only exists once Tushpa's dbo.Reports table has been deployed (see 01_analytics_views.sql).
+        const string existsSql = "SELECT CASE WHEN OBJECT_ID(N'analytics.vw_Reports', N'V') IS NULL THEN 0 ELSE 1 END;";
+        const string sql = """
+            SELECT COUNT(*) FROM analytics.vw_Reports;
+
+            SELECT ReportId, CreatedAtUtc, Title, Description,
+                   ReporterUserId, ReporterFullName, ReporterIsDeleted,
+                   ReportedUserId, ReportedFullName, ReportedIsDeleted,
+                   EmailSent
+            FROM analytics.vw_Reports
+            ORDER BY CreatedAtUtc DESC, ReportId DESC
+            OFFSET @Offset ROWS FETCH NEXT @PageSize ROWS ONLY;
+            """;
+
+        await using var connection = Open();
+        var exists = await connection.ExecuteScalarAsync<int>(new CommandDefinition(existsSql,
+            commandTimeout: CommandTimeoutSeconds, cancellationToken: ct));
+        if (exists == 0)
+        {
+            return IssueReportPage.NotAvailable;
+        }
+
+        using var results = await connection.QueryMultipleAsync(new CommandDefinition(sql,
+            new { Offset = Math.Max(0, offset), PageSize = Math.Max(1, pageSize) },
+            commandTimeout: CommandTimeoutSeconds, cancellationToken: ct));
+        var total = await results.ReadSingleAsync<int>();
+        var rows = (await results.ReadAsync<IssueReport>()).AsList();
+        return new IssueReportPage(true, total, rows);
     }
 
     private async Task<IReadOnlyList<T>> QueryAsync<T>(string sql, DateRange range, int? cityId, CancellationToken ct)
