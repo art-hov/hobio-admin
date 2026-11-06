@@ -7,6 +7,9 @@
     The views expose aggregate-friendly columns only: no names, emails, phone numbers or payment IDs.
     The one exception is vw_UserDirectory, which adds each user's full name for the portal's Users page
     (still no emails, phone numbers, dates of birth or payment IDs; deleted accounts show no name).
+    vw_Reports adds user-submitted issue reports with the reporter's and reported user's full names, plus the
+    reporter's email so an admin can reply (no other user's email is exposed).
+    It is created only when dbo.Reports exists, so this script still runs on databases without that table.
     The portal's read-only login can read these views and nothing else (see 02_readonly_user.sql).
 
     Assumptions (check against Tushpa if numbers look off):
@@ -200,4 +203,32 @@ SELECT
     co.[Name]   AS CountryName
 FROM [dbo].[Cities] AS c
 LEFT JOIN [dbo].[Countries] AS co ON co.[Id] = c.[CountryId];
+GO
+
+/* User-submitted issue reports (Tushpa ReportsController) for the Reports page. Names follow vw_UserDirectory:
+   deleted accounts show no name. ReporterEmail is the reporter's address for replies (null if deleted).
+   Created only when dbo.Reports exists. */
+IF OBJECT_ID(N'[dbo].[Reports]', N'U') IS NOT NULL
+    EXEC (N'
+CREATE OR ALTER VIEW [analytics].[vw_Reports]
+AS
+SELECT
+    r.[Id]                                                                      AS ReportId,
+    r.[CreatedAt]                                                               AS CreatedAtUtc,
+    CAST((r.[CreatedAt] AT TIME ZONE ''UTC'') AT TIME ZONE ''Eastern Standard Time'' AS date) AS CreatedDateLocal,
+    r.[Title]                                                                   AS Title,
+    r.[Description]                                                             AS Description,
+    r.[ReporterUserId]                                                          AS ReporterUserId,
+    reporter.FullName                                                           AS ReporterFullName,
+    CAST(COALESCE(reporter.IsDeleted, 0) AS bit)                                AS ReporterIsDeleted,
+    CASE WHEN ru.[IsDeleted] = 0 THEN NULLIF(LTRIM(RTRIM(ru.[Email])), N'''') END AS ReporterEmail,
+    r.[ReportedUserId]                                                          AS ReportedUserId,
+    reported.FullName                                                           AS ReportedFullName,
+    CAST(COALESCE(reported.IsDeleted, 0) AS bit)                                AS ReportedIsDeleted,
+    CAST(CASE WHEN r.[EmailSentAt] IS NOT NULL THEN 1 ELSE 0 END AS bit)        AS EmailSent
+FROM [dbo].[Reports] AS r
+LEFT JOIN [analytics].[vw_UserDirectory] AS reporter ON reporter.UserId = r.[ReporterUserId]
+LEFT JOIN [dbo].[Users] AS ru ON ru.[Id] = r.[ReporterUserId]
+LEFT JOIN [analytics].[vw_UserDirectory] AS reported ON reported.UserId = r.[ReportedUserId];
+');
 GO

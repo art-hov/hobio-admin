@@ -85,6 +85,12 @@ public static class UserSignupRange
     }
 }
 
+public sealed record ReportsData(int Page, int PageSize, IssueReportPage Reports)
+{
+    public const int DefaultPageSize = 50;
+    public int PageCount => Math.Max(1, (int)Math.Ceiling(Reports.Total / (double)PageSize));
+}
+
 public interface IAnalyticsService
 {
     bool IsConfigured { get; }
@@ -94,6 +100,7 @@ public interface IAnalyticsService
     Task<InvestorReportData> GetInvestorReportAsync(ReportPeriod period, CancellationToken ct = default);
     Task<IReadOnlyList<CityOption>> GetCityOptionsAsync(CancellationToken ct = default);
     Task<UsersData> GetUsersAsync(DateOnly? from, DateOnly? to, int page, CancellationToken ct = default);
+    Task<ReportsData> GetReportsAsync(int page, CancellationToken ct = default);
     DateTime UtcNow { get; }
 }
 
@@ -207,6 +214,14 @@ public sealed class AnalyticsService(IAnalyticsRepository repository, TimeProvid
     public Task<IReadOnlyList<CityOption>> GetCityOptionsAsync(CancellationToken ct = default) => repository.GetCitiesAsync(ct);
 
     public DateTime UtcNow => clock.GetUtcNow().UtcDateTime;
+
+    public async Task<ReportsData> GetReportsAsync(int page, CancellationToken ct = default)
+    {
+        var pageNumber = Math.Max(1, page);
+        var size = ReportsData.DefaultPageSize;
+        var reports = await repository.GetIssueReportsAsync((pageNumber - 1) * size, size, ct);
+        return new ReportsData(pageNumber, size, reports);
+    }
 
     public async Task<UsersData> GetUsersAsync(DateOnly? from, DateOnly? to, int page, CancellationToken ct = default)
     {

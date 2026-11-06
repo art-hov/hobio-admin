@@ -101,6 +101,35 @@ html, body {
     flex: 0 0 auto;
 }
 
+/* ---------- Reports page ---------- */
+.report-text {
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    min-width: 220px;
+    max-width: 520px;
+}
+
+.report-title {
+    font-weight: 600;
+}
+
+.report-none {
+    color: var(--hobio-muted);
+}
+
+.report-email {
+    color: var(--hobio-muted);
+    font-size: 0.8125rem;
+    overflow-wrap: anywhere;
+}
+
+.report-quote {
+    border-left: 3px solid var(--hobio-border);
+    padding-left: 12px;
+    color: var(--hobio-muted);
+    max-width: none;
+}
+
 /* ---------- Users page ---------- */
 .user-deleted {
     color: var(--hobio-muted);

@@ -63,6 +63,7 @@ public sealed class ScreenshotTests(SqlServerFixture db)
                 ("overview-1y", "/?period=1y"),
                 ("overview-1w", "/?period=1w"),
                 ("users", "/users?from=2026-10-01&to=2026-10-31"),
+                ("reports", "/reports"),
                 ("cities", "/cities?period=1m"),
                 ("retention", "/retention"),
                 ("investor-report", "/investor-report?period=1m"),

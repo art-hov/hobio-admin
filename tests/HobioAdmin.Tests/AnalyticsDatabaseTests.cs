@@ -23,6 +23,31 @@ public sealed class SqlServerFixture : IAsyncLifetime
 
     public bool Available => ReaderConnectionString is not null;
 
+    public bool ReportsViewCreatedWithoutTable { get; private set; }
+
+    private static async Task<int> ScalarAsync(string connectionString, string sql)
+    {
+        await using var connection = new SqlConnection(connectionString);
+        await connection.OpenAsync();
+        await using var cmd = new SqlCommand(sql, connection);
+        return (int)(await cmd.ExecuteScalarAsync())!;
+    }
+
+    // Same shape as Tushpa's src/TushpaDB/Tables/Reports.sql.
+    private const string ReportsTableSql = """
+        CREATE TABLE [dbo].[Reports] (
+            [Id] BIGINT PRIMARY KEY IDENTITY,
+            [ReporterUserId] UNIQUEIDENTIFIER NOT NULL,
+            [ReportedUserId] UNIQUEIDENTIFIER NULL,
+            [Title] NVARCHAR(200) NOT NULL,
+            [Description] NVARCHAR(4000) NOT NULL,
+            [CreatedAt] DATETIME2 NOT NULL DEFAULT GETUTCDATE(),
+            [EmailSentAt] DATETIME2 NULL,
+            CONSTRAINT FK_Reports_ReporterUser FOREIGN KEY (ReporterUserId) REFERENCES [dbo].[Users](Id),
+            CONSTRAINT FK_Reports_ReportedUser FOREIGN KEY (ReportedUserId) REFERENCES [dbo].[Users](Id)
+        );
+        """;
+
     public async Task InitializeAsync()
     {
         _serverConnectionString = Environment.GetEnvironmentVariable("HOBIO_TEST_SQL");
@@ -43,8 +68,13 @@ public sealed class SqlServerFixture : IAsyncLifetime
         AdminConnectionString = new SqlConnectionStringBuilder(server.ConnectionString) { InitialCatalog = _databaseName }.ConnectionString;
 
         await SqlScripts.ExecuteBatchesAsync(AdminConnectionString, LoadFixture());
+
+        // Like a database where Tushpa's Reports table isn't deployed yet: the script must still succeed.
         await SqlScripts.ApplyViewsAsync(AdminConnectionString);
-        await SqlScripts.ApplyViewsAsync(AdminConnectionString); // re-runnable
+        ReportsViewCreatedWithoutTable = await ScalarAsync(AdminConnectionString, "SELECT CASE WHEN OBJECT_ID(N'analytics.vw_Reports') IS NULL THEN 0 ELSE 1 END") == 1;
+
+        await SqlScripts.ExecuteBatchesAsync(AdminConnectionString, ReportsTableSql);
+        await SqlScripts.ApplyViewsAsync(AdminConnectionString); // re-runnable, and now creates vw_Reports
         await SqlScripts.CreateReaderAsync(AdminConnectionString, ReaderPassword, ReaderLogin);
         await SqlScripts.CreateReaderAsync(AdminConnectionString, ReaderPassword, ReaderLogin); // re-runnable
         await SqlScripts.ExecuteBatchesAsync(AdminConnectionString, SeedSql);
@@ -93,6 +123,10 @@ public sealed class SqlServerFixture : IAsyncLifetime
             (@P3, N'P',    N'Three', '1990-01-01', '2026-10-03T12:00:00', N'P3', 1, NULL),
             (@P4, N'P',    N'Four',  '1990-01-01', '2026-10-20T12:00:00', N'P4', 0, @P1);
 
+        UPDATE dbo.Users SET Email = 'p1@example.com' WHERE Id = @P1;
+        UPDATE dbo.Users SET Email = 'p2@example.com' WHERE Id = @P2;
+        UPDATE dbo.Users SET Email = 'p3@example.com' WHERE Id = @P3; -- deleted: never exposed
+
         INSERT INTO dbo.Countries (Name, Code) VALUES (N'Canada', N'CA');
         INSERT INTO dbo.Cities (Name, CountryId, TimeZoneId, CityCode) VALUES (N'Ottawa', 1, 'America/Toronto', 1), (N'Gatineau', 1, 'America/Toronto', 2);
         INSERT INTO dbo.Sports (Id, Name, Slug) VALUES (1, N'Soccer', N'soccer');
@@ -122,6 +156,11 @@ public sealed class SqlServerFixture : IAsyncLifetime
         INSERT INTO dbo.Transactions (BookingHoldId, BookingId, EventId, UserId, GrossAmount, HostAmount, HobioFeeAmount, StripeFeeAmount, CreatedAt, RefundStatus) VALUES
             (1, 2, 1, @P1, 21.00, 19.00, 1.00, 1.00, '2026-10-02T13:01:00', 1),
             (2, 3, 1, @P2, 21.00, 19.00, 1.00, 1.00, '2026-10-02T14:01:00', 3); -- refunded: excluded from revenue
+
+        INSERT INTO dbo.Reports (ReporterUserId, ReportedUserId, Title, Description, CreatedAt, EmailSentAt) VALUES
+            (@P1, NULL, N'App crash', N'The app closed when I opened my bookings.', '2026-10-05T12:00:00', '2026-10-05T12:00:05'),
+            (@P2, @P4,  N'No-show', N'Booked and never came.',                       '2026-10-21T12:00:00', NULL),
+            (@P1, @P3,  N'Rude player', N'Was rude during the game.',                  '2026-10-22T12:00:00', '2026-10-22T12:00:03');
 
         INSERT INTO dbo.Payouts (HostUserId, Amount, HobioFeeAmount, Status, CreatedAt) VALUES
             (@H, 100.00, 3.00, 2, '2026-10-10T12:00:00'),
@@ -376,6 +415,95 @@ public sealed class AnalyticsDatabaseTests(SqlServerFixture db)
         Assert.Equal(users.Range.From, week.Range.From);
         Assert.Equal(1, week.Current.NewUsers);
         Assert.Equal(7, week.Users.Buckets.Count);
+    }
+
+    [Fact]
+    public void Views_script_runs_before_the_reports_table_exists()
+    {
+        if (!db.Available) return;
+
+        Assert.False(db.ReportsViewCreatedWithoutTable);
+    }
+
+    [Fact]
+    public async Task Issue_reports_list_newest_first_with_both_names()
+    {
+        if (!db.Available) return;
+
+        var page = await Repo().GetIssueReportsAsync(offset: 0, pageSize: 50);
+
+        Assert.True(page.Available);
+        Assert.Equal(3, page.Total);
+        Assert.Equal(new[] { "Rude player", "No-show", "App crash" }, page.Rows.Select(r => r.Title).ToArray());
+
+        var rude = page.Rows[0];
+        Assert.Equal("P One", rude.ReporterFullName);
+        Assert.Null(rude.ReportedFullName);   // P3 is deleted: name withheld
+        Assert.True(rude.ReportedIsDeleted);
+        Assert.True(rude.EmailSent);
+
+        var noShow = page.Rows[1];
+        Assert.Equal("P Two", noShow.ReporterFullName);
+        Assert.Equal("P Four", noShow.ReportedFullName);
+        Assert.False(noShow.EmailSent);
+
+        var crash = page.Rows[2];
+        Assert.Null(crash.ReportedUserId);    // general issue, no reported user
+        Assert.Null(crash.ReportedFullName);
+        Assert.False(crash.ReportedIsDeleted);
+        Assert.Equal("The app closed when I opened my bookings.", crash.Description);
+
+        Assert.Equal("p1@example.com", rude.ReporterEmail);
+        Assert.Equal("p2@example.com", noShow.ReporterEmail);
+    }
+
+    [Fact]
+    public async Task Single_report_lookup_returns_reporter_email()
+    {
+        if (!db.Available) return;
+
+        var all = await Repo().GetIssueReportsAsync(0, 50);
+        var id = all.Rows.Single(r => r.Title == "No-show").ReportId;
+
+        var report = await Repo().GetIssueReportAsync(id);
+
+        Assert.NotNull(report);
+        Assert.Equal("p2@example.com", report.ReporterEmail);
+        Assert.Equal("P Two", report.ReporterFullName);
+        Assert.Null(await Repo().GetIssueReportAsync(999_999));
+    }
+
+    [Fact]
+    public async Task Reports_view_exposes_only_the_reporters_email()
+    {
+        if (!db.Available) return;
+
+        await using var connection = new SqlConnection(db.ReaderConnectionString);
+        await connection.OpenAsync();
+        await using var cmd = new SqlCommand(
+            "SELECT name FROM sys.columns WHERE object_id = OBJECT_ID('analytics.vw_Reports') AND name LIKE '%Email%' ORDER BY name", connection);
+        var columns = new List<string>();
+        await using (var reader = await cmd.ExecuteReaderAsync())
+        {
+            while (await reader.ReadAsync())
+            {
+                columns.Add(reader.GetString(0));
+            }
+        }
+
+        // EmailSent is a yes/no flag; ReporterEmail is the only address.
+        Assert.Equal(new[] { "EmailSent", "ReporterEmail" }, columns);
+    }
+
+    [Fact]
+    public async Task Issue_reports_page_in_sql_and_keep_total()
+    {
+        if (!db.Available) return;
+
+        var page = await Repo().GetIssueReportsAsync(offset: 2, pageSize: 2);
+
+        Assert.Equal(3, page.Total);
+        Assert.Equal("App crash", Assert.Single(page.Rows).Title);
     }
 
     [Fact]

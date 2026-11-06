@@ -22,9 +22,17 @@ public sealed class PortalPageTests(SqlServerFixture db)
 {
     private const string AdminEmail = "admin@hobio.ca";
 
-    private WebApplicationFactory<HobioAdmin.Web.WebAppMarker> CreateFactory(bool signedIn) =>
+    private WebApplicationFactory<HobioAdmin.Web.WebAppMarker> CreateFactory(bool signedIn, bool emailConfigured = false) =>
         new WebApplicationFactory<HobioAdmin.Web.WebAppMarker>().WithWebHostBuilder(builder =>
         {
+            if (emailConfigured)
+            {
+                builder.UseSetting("EmailCredentials:Host", "smtp.example.invalid");
+                builder.UseSetting("EmailCredentials:Port", "587");
+                builder.UseSetting("EmailCredentials:Email", "support@hobio.ca");
+                builder.UseSetting("EmailCredentials:Password", "not-a-real-password");
+            }
+
             builder.UseEnvironment("Testing");
             builder.UseSetting("Admin:AllowedEmails", AdminEmail);
             builder.UseSetting("Auth:RequireHttps", "false");
@@ -67,6 +75,7 @@ public sealed class PortalPageTests(SqlServerFixture db)
     [Theory]
     [InlineData("/cities")]
     [InlineData("/users")]
+    [InlineData("/reports")]
     [InlineData("/retention")]
     [InlineData("/investor-report")]
     [InlineData("/_blazor/negotiate?negotiateVersion=1")]
@@ -248,6 +257,45 @@ public sealed class PortalPageTests(SqlServerFixture db)
         Assert.Contains("Oct 25, 2026", html);
         Assert.Contains("Oct 31, 2026", html);
         Assert.Contains("No users joined in this period.", html);
+    }
+
+    [Fact]
+    public async Task Reports_page_shows_issues_with_reporter_and_reported_names()
+    {
+        if (!db.Available) return;
+        using var factory = CreateFactory(signedIn: true);
+        using var client = Client(factory);
+
+        var html = await GetOk(client, "/reports");
+
+        Assert.Contains("Reported issues", html);
+        Assert.Contains("Rude player", html);
+        Assert.Contains("Was rude during the game.", html);
+        Assert.Contains("P One", html);                // reporter
+        Assert.Contains("P Four", html);               // reported user
+        Assert.Contains("General issue", html);        // report with no reported user
+        Assert.Contains("Deleted account", html);      // reported user P3 was deleted
+        Assert.DoesNotContain("P Three", html);
+        Assert.Contains("Not sent", html);
+        Assert.Contains("Oct 22, 2026", html);
+        Assert.Contains("p1@example.com", html);       // reporter's email
+        Assert.DoesNotContain("p3@example.com", html); // the reported (deleted) user's email is never shown
+        Assert.Contains("Replying is off", html);      // no EmailCredentials in this test
+        Assert.DoesNotContain("reply-button", html);
+    }
+
+    [Fact]
+    public async Task Reports_page_offers_reply_when_email_is_configured()
+    {
+        if (!db.Available) return;
+        using var factory = CreateFactory(signedIn: true, emailConfigured: true);
+        using var client = Client(factory);
+
+        var html = await GetOk(client, "/reports");
+
+        Assert.DoesNotContain("Replying is off", html);
+        Assert.Contains("reply-button", html);
+        Assert.Contains("p2@example.com", html);
     }
 
     [Fact]

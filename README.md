@@ -85,6 +85,20 @@ Both secret names go into `AWS_SECRET_IDS` in step 5, comma separated.
 > Tushpa's API loads *every* secret in the account, so it will also see this new one. That's harmless, because Tushpa
 > never reads `HobioAdmin__*` keys.
 
+**Replying to reported issues (optional).** Add an `EmailCredentials` block to the same secret. Replies are sent
+from `Email` over STARTTLS (use port 587; .NET's SmtpClient can't do implicit TLS on 465), and every reply is BCC'd
+to that mailbox, which is the only record of what was sent. Without this block the Reports page shows the reports but
+no Reply button.
+
+```json
+"EmailCredentials": {
+  "Host": "smtp.example.com",
+  "Port": 587,
+  "Email": "support@hobio.ca",
+  "Password": "<smtp password or app password>"
+}
+```
+
 ### 4. HTTPS certificate (recommended)
 
 In **Certificate Manager (ca-central-1)**, request a public certificate for the portal domain, for example
